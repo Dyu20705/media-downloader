@@ -1,0 +1,17 @@
+# Third-party media binaries
+youtube-downloader/ffmpeg-master-latest-win64-gpl/
+youtube-downloader/*.exe
+
+# Downloaded/generated media
+downloads/
+output/
+*.mp3
+*.mp4
+*.m4a
+*.flac
+*.webm
+*.wav
+
+# Temporary files
+*.part
+*.ytdl

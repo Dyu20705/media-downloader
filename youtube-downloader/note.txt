@@ -1,0 +1,389 @@
+yt-dlp -f "bv+ba/b" ^
+  --merge-output-format mkv ^
+  --embed-metadata ^
+  --embed-thumbnail ^
+  --embed-chapters ^
+  -o "%(title)s [%(id)s].%(ext)s" ^
+  "URL_VIDEO"
+yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv+ba/b" --merge-output-format mp4 "URL_VIDEO"
+yt-dlp -f "bestaudio" -x --audio-format flac --embed-metadata --embed-thumbnail -o "%(title)s.%(ext)s" "link"
+
+Tải livestream realtime
+
+yt-dlp "URL_LIVESTREAM" ^
+  --live-from-start ^
+  --wait-for-video 30-300 ^
+  -f "bv*+ba/best" ^
+  --hls-use-mpegts ^
+  --continue ^
+  -R infinite ^
+  --fragment-retries infinite ^
+  --file-access-retries infinite ^
+  --retry-sleep http:linear=5::5 ^
+  --retry-sleep fragment:exp=1:20 ^
+  --concurrent-fragments 1 ^
+  --no-overwrites ^
+  -o "archive/%(upload_date)s-%(title).100B-%(id)s.%(ext)s"
+
+ffmpeg -i "input.ts" -c copy "output.mp4"
+
+yt-dlp "URL_LIVESTREAM" ^
+  --live-from-start ^
+  --hls-use-mpegts ^
+  --remux-video mp4 ^
+  -o "live-%(title).80B-%(id)s.%(ext)s"
+
+📁 Thư mục của bạn/
+├── yt-dlp.exe
+├── ffmpeg.exe
+└── ffprobe.exe
+
+không có tiếng -> không giải được file "codec"
+
+Thử mở video bằng trình duyệt web (Kéo thả file video vừa tải vào một tab trống của Google Chrome, Edge hoặc Brave). Nếu trình duyệt có tiếng thì file hoàn toàn bình thường.
+
+Bạn nên sử dụng các phần mềm xem video chuyên dụng, hỗ trợ mọi loại codec như VLC Media Player hoặc PotPlayer để xem mượt mà nhất.
+
+
+
+
+
+
+
+
+
+# HƯỚNG DẪN YT-DLP TỐI ƯU TRÊN WINDOWS
+
+## 1. Quy ước lệnh
+
+Các lệnh bên dưới giả định `yt-dlp`, `ffmpeg`, `ffprobe`, `deno` và `mediainfo` đã nằm trong `PATH`.
+
+Nếu Windows chưa nhận lệnh `yt-dlp`, thay:
+
+```cmd
+yt-dlp
+```
+
+bằng:
+
+```cmd
+py -m yt_dlp
+```
+
+Nếu sử dụng bản portable trong PowerShell, dùng:
+
+```powershell
+.\yt-dlp.exe
+```
+
+---
+
+## 2. Kiểm tra môi trường
+
+```cmd
+yt-dlp --version
+ffmpeg -version
+ffprobe -version
+deno --version
+mediainfo --Version
+```
+
+Kiểm tra chi tiết những dependency mà yt-dlp nhận diện:
+
+```cmd
+yt-dlp -v
+```
+
+---
+
+## 3. Tải video chất lượng cao nhất
+
+### Khuyến nghị: MKV, giữ nguyên codec gốc
+
+```cmd
+yt-dlp -t mkv --embed-metadata --embed-chapters --embed-thumbnail --windows-filenames --trim-filenames 180 -P "D:\Videos" -o "%(title)s [%(id)s].%(ext)s" "LINK_YOUTUBE"
+```
+
+Cấu hình này:
+
+* Chọn video và audio tốt nhất.
+* Ghép bằng FFmpeg.
+* Không mã hóa lại video hoặc audio.
+* Giữ được AV1, VP9, Opus, HDR, 4K, 8K nếu nguồn cung cấp.
+* Nhúng metadata, chapter và thumbnail.
+* Dùng MKV để tránh xung đột codec/container.
+
+Lệnh tối giản:
+
+```cmd
+yt-dlp -t mkv "LINK_YOUTUBE"
+```
+
+---
+
+## 4. Tải MP4 có độ tương thích cao
+
+Dùng khi cần phát trên TV, điện thoại, trình dựng phim hoặc phần mềm chỉ hỗ trợ tốt H.264/AAC:
+
+```cmd
+yt-dlp -t mp4 --embed-metadata --embed-chapters --embed-thumbnail --windows-filenames --trim-filenames 180 -P "D:\Videos" -o "%(title)s [%(id)s].%(ext)s" "LINK_YOUTUBE"
+```
+
+Lệnh tối giản:
+
+```cmd
+yt-dlp -t mp4 "LINK_YOUTUBE"
+```
+
+Lưu ý: MP4 tương thích cao có thể không phải stream có độ phân giải hoặc codec tốt nhất tuyệt đối. Muốn giữ chất lượng nguồn cao nhất, ưu tiên MKV.
+
+---
+
+## 5. Xem toàn bộ format có sẵn
+
+```cmd
+yt-dlp -F "LINK_YOUTUBE"
+```
+
+Xem thêm thông tin debug và các dependency đang được sử dụng:
+
+```cmd
+yt-dlp -v -F "LINK_YOUTUBE"
+```
+
+---
+
+## 6. Chọn thủ công video ID và audio ID
+
+Sau khi chạy `-F`, chọn một video-only ID và một audio-only ID:
+
+```cmd
+yt-dlp -f "VIDEO_ID+AUDIO_ID" --merge-output-format mkv --embed-metadata --embed-chapters --embed-thumbnail -P "D:\Videos" "LINK_YOUTUBE"
+```
+
+Ví dụ:
+
+```cmd
+yt-dlp -f "401+251" --merge-output-format mkv "LINK_YOUTUBE"
+```
+
+Không sao chép ID từ video khác vì format ID có thể thay đổi theo từng video.
+
+---
+
+## 7. Chỉ tải audio gốc chất lượng tốt nhất
+
+```cmd
+yt-dlp -f "ba" --embed-metadata --embed-thumbnail --windows-filenames --trim-filenames 180 -P "D:\Music" -o "%(title)s [%(id)s].%(ext)s" "LINK_YOUTUBE"
+```
+
+Kết quả thường là:
+
+* Opus trong `.webm`.
+* AAC trong `.m4a`.
+
+Đây là stream audio gốc mà YouTube cung cấp, không bị mã hóa lại.
+
+### Không dùng FLAC để “tăng chất lượng”
+
+Lệnh chuyển sang FLAC chỉ tạo file lớn hơn:
+
+```cmd
+yt-dlp -f "ba" -x --audio-format flac "LINK_YOUTUBE"
+```
+
+YouTube cung cấp audio lossy. Chuyển Opus/AAC sang FLAC không phục hồi dữ liệu âm thanh đã mất. Chỉ chuyển sang FLAC khi một phần mềm khác bắt buộc yêu cầu định dạng này.
+
+---
+
+## 8. Cấu trúc portable hợp lệ
+
+Nếu không cài FFmpeg vào `PATH`, đặt các file cùng thư mục:
+
+```text
+youtube-downloader\
+├── yt-dlp.exe
+├── ffmpeg.exe
+└── ffprobe.exe
+```
+
+Khi chúng nằm cùng thư mục, thông thường không cần:
+
+```cmd
+--ffmpeg-location .
+```
+
+Chỉ chỉ định thủ công khi FFmpeg nằm ở thư mục khác và chưa được thêm vào `PATH`:
+
+```cmd
+yt-dlp --ffmpeg-location "C:\Tools\ffmpeg\bin" -t mkv "LINK_YOUTUBE"
+```
+
+MediaInfo và Deno có thể được cài vào `PATH`; không bắt buộc đặt cạnh `yt-dlp.exe`.
+
+---
+
+## 9. Kiểm tra file bằng MediaInfo
+
+Xem thông tin quan trọng:
+
+```cmd
+mediainfo "D:\Videos\video.mkv"
+```
+
+Xem toàn bộ thông tin:
+
+```cmd
+mediainfo --Full "D:\Videos\video.mkv"
+```
+
+Kiểm tra nhanh bằng FFprobe:
+
+```cmd
+ffprobe -hide_banner "D:\Videos\video.mkv"
+```
+
+Xuất báo cáo JSON bằng PowerShell:
+
+```powershell
+mediainfo --Output=JSON "D:\Videos\video.mkv" | Out-File -Encoding utf8 "D:\Videos\video.mediainfo.json"
+```
+
+Những mục cần kiểm tra:
+
+```text
+Video:
+- Format / Codec
+- Width và Height
+- Frame rate
+- Bit depth
+- HDR format
+
+Audio:
+- Format / Codec
+- Bit rate
+- Sampling rate
+- Channel(s)
+```
+
+---
+
+## 10. Video không có tiếng
+
+### Bước 1: Kiểm tra file có audio stream không
+
+```cmd
+mediainfo "D:\Videos\video.mkv"
+```
+
+Hoặc:
+
+```cmd
+ffprobe -hide_banner "D:\Videos\video.mkv"
+```
+
+Nếu kết quả không có phần `Audio` hoặc không có dòng `Stream ... Audio`, file thực sự không chứa audio.
+
+Kiểm tra FFmpeg:
+
+```cmd
+ffmpeg -version
+ffprobe -version
+```
+
+Sau đó tải lại:
+
+```cmd
+yt-dlp -t mkv "LINK_YOUTUBE"
+```
+
+### Bước 2: File có audio stream nhưng trình phát không phát tiếng
+
+Nguyên nhân thường là trình phát hoặc hệ điều hành không hỗ trợ codec của file.
+
+Sử dụng trình phát có hỗ trợ codec rộng như:
+
+* VLC Media Player.
+* mpv.
+* PotPlayer.
+
+Không dùng trình duyệt làm phép kiểm tra chính vì trình duyệt không hỗ trợ đầy đủ mọi tổ hợp container và codec, đặc biệt với MKV, AV1, VP9 hoặc Opus.
+
+### Bước 3: Cần tương thích tối đa
+
+Tải lại bằng preset MP4:
+
+```cmd
+yt-dlp -t mp4 "LINK_YOUTUBE"
+```
+
+### Bước 4: Thu thập log khi vẫn lỗi
+
+```cmd
+yt-dlp -v -t mkv "LINK_YOUTUBE"
+```
+
+Kiểm tra trong log xem có các dòng:
+
+```text
+[Merger] Merging formats into ...
+[debug] ffmpeg command line: ...
+```
+
+Nếu không có bước merge, kiểm tra lại FFmpeg và format đã chọn.
+
+---
+
+## 11. Lệnh nên dùng thường xuyên nhất
+
+Chất lượng cao nhất:
+
+```cmd
+yt-dlp -t mkv --embed-metadata --embed-chapters --embed-thumbnail -P "D:\Videos" "LINK_YOUTUBE"
+```
+
+MP4 tương thích cao:
+
+```cmd
+yt-dlp -t mp4 --embed-metadata --embed-chapters --embed-thumbnail -P "D:\Videos" "LINK_YOUTUBE"
+```
+
+Audio gốc tốt nhất:
+
+```cmd
+yt-dlp -f "ba" --embed-metadata --embed-thumbnail -P "D:\Music" "LINK_YOUTUBE"
+```
+
+Xem format:
+
+```cmd
+yt-dlp -F "LINK_YOUTUBE"
+```
+
+Chọn format thủ công:
+
+```cmd
+yt-dlp -f "VIDEO_ID+AUDIO_ID" --merge-output-format mkv "LINK_YOUTUBE"
+```
+
+Kiểm tra file:
+
+```cmd
+mediainfo "D:\Videos\video.mkv"
+```
+
+---
+
+## 12. Lưu ý khi đưa lệnh vào file `.bat`
+
+Trong CMD hoặc PowerShell, dùng một dấu `%`:
+
+```cmd
+-o "%(title)s [%(id)s].%(ext)s"
+```
+
+Trong file `.bat`, phải đổi thành hai dấu `%`:
+
+```bat
+-o "%%(title)s [%%(id)s].%%(ext)s"
+```
