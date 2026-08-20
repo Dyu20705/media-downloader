@@ -1,17 +1,41 @@
-# Third-party media binaries
-youtube-downloader/ffmpeg-master-latest-win64-gpl/
-youtube-downloader/*.exe
+# Node & Frontend Build
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Rust & Tauri Build
+target/
+src-tauri/target/
+
+# Third-party media binaries & tools
+youtube-downloader/
+tools/
+*.exe
+*.dll
+*.dylib
+*.so
 
 # Downloaded/generated media
 downloads/
 output/
+temp_downloads/
 *.mp3
 *.mp4
 *.m4a
 *.flac
 *.webm
 *.wav
+*.mkv
+*.ts
 
-# Temporary files
+# Temporary files & logs
 *.part
 *.ytdl
+*.log
+.DS_Store
+Thumbs.db
+.env
+!.env.example

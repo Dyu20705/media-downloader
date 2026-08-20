@@ -1,0 +1,39 @@
+[package]
+name = "one-click-media-downloader"
+version = "1.0.0"
+description = "One-Click Media Downloader Desktop App"
+authors = ["One-Click Media Downloader Team"]
+edition = "2021"
+
+[lib]
+name = "one_click_media_downloader_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.5", features = [] }
+
+[dependencies]
+ocmd-core = { path = "./crates/core" }
+tauri = { version = "2.1.1", features = [] }
+tauri-plugin-opener = "2.0.0"
+tauri-plugin-dialog = "2.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.38", features = ["full"] }
+regex = "1.10"
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1.38", features = ["full", "test-util"] }
+tempfile = "3.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
