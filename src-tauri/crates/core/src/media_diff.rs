@@ -1,4 +1,4 @@
-use crate::core::types::{MediaDiff, MediaFingerprint};
+use crate::types::{MediaDiff, MediaFingerprint};
 
 /// P2 Extension Point: Media Diff Domain Boundary
 pub struct MediaDiffEngine;

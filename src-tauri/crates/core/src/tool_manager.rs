@@ -106,6 +106,7 @@ pub fn get_pinned_tool_spec(name: &str) -> Option<&'static PinnedToolSpec> {
     PINNED_TOOLS.iter().find(|t| t.name.eq_ignore_ascii_case(name))
 }
 
+#[derive(Debug, Clone)]
 pub struct ResolvedExecutable {
     pub name: String,
     pub path: PathBuf,

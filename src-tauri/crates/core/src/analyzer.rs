@@ -1,12 +1,12 @@
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::process::Command;
-use crate::core::tools::ToolResolver;
-use crate::core::types::{
+use crate::tools::ToolResolver;
+use crate::types::{
     FormatRecommendation, MediaChapter, MediaFormatSpec, MediaKind, MediaMetadata, PresetType,
-    SubtitleTrack,
+    SubtitleTrack, TranscodingCost,
 };
-use crate::core::url_validator::validate_media_url;
+use crate::url_validator::validate_media_url;
 
 pub async fn analyze_media_metadata(
     url: &str,
@@ -340,6 +340,11 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         view_count,
         like_count,
         description,
+        source_type: None,
+        strategy: None,
+        transcoding_cost: None,
+        transcoding_explanation: None,
+        capabilities: None,
         categories,
         tags,
         language,
@@ -418,6 +423,10 @@ pub fn generate_smart_recommendation(
             reason: "Extracts untouched source audio stream (Opus/AAC) without lossy transcoding".to_string(),
             is_transcode_free: true,
             details: Some("Direct container copy".to_string()),
+            why_reasons: vec![],
+            transcoding_cost: TranscodingCost::NoProcessing,
+            estimated_size_bytes: None,
+            container: "m4a/opus".to_string(),
         });
     }
 
@@ -435,6 +444,10 @@ pub fn generate_smart_recommendation(
             reason: "Preserves pristine source bitrates, wide-color HDR, and modern VP9/AV1 codecs in MKV".to_string(),
             is_transcode_free: true,
             details: Some("No video transcoding required".to_string()),
+            why_reasons: vec![],
+            transcoding_cost: TranscodingCost::Merge,
+            estimated_size_bytes: None,
+            container: "mkv".to_string(),
         });
     }
 
@@ -459,6 +472,10 @@ pub fn generate_smart_recommendation(
         },
         is_transcode_free: has_native_mp4_h264,
         details: Some("Universal H.264 / AAC MP4 container".to_string()),
+        why_reasons: vec![],
+        transcoding_cost: if has_native_mp4_h264 { TranscodingCost::Merge } else { TranscodingCost::Transcode },
+        estimated_size_bytes: None,
+        container: "mp4".to_string(),
     })
 }
 

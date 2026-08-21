@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
-use crate::core::tools::ToolResolver;
-use crate::core::types::{
+use crate::tools::ToolResolver;
+use crate::types::{
     DownloadJob, ExplainableResult, MediaInspection, MediaKind, OutputMediaArtifact,
     PresetType, TranscodingCost, VerificationChecklist, VerificationResult,
 };

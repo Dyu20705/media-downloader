@@ -1,5 +1,5 @@
 use thiserror::Error;
-use crate::core::types::DownloadStatus;
+use crate::types::DownloadStatus;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum StateMachineError {

@@ -1,4 +1,4 @@
-use crate::core::types::{
+use crate::types::{
     DownloadJob, DownloadRecipe, DownloadStrategy, MediaMetadata, MediaSourceType, PresetType,
     UserIntent, VerificationChecklist,
 };
@@ -64,7 +64,7 @@ impl RecipeEngine {
         }
 
         if let Some(opts) = &job.subtitle_options {
-            if opts.mode == crate::core::types::SubtitleMode::Embed {
+            if opts.mode == crate::types::SubtitleMode::Embed {
                 transformations.push(format!(
                     "Embed subtitle stream ({})",
                     opts.selected_language.as_deref().unwrap_or("auto")
@@ -126,7 +126,7 @@ fn sanitize_url(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::*;
+    use crate::types::*;
 
     #[test]
     fn test_recipe_creation_and_sanitization() {

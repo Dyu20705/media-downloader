@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use chrono::Local;
-use crate::core::types::DiagnosticLog;
+use crate::types::DiagnosticLog;
 
 const MAX_LOG_LINES: usize = 256;
 const MAX_TOTAL_BYTES: usize = 64 * 1024; // <= 64 KiB retained text

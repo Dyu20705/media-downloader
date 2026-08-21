@@ -3,13 +3,13 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::core::analyzer::parse_ytdlp_json;
-use crate::core::tools::ToolResolver;
-use crate::core::types::{
+use crate::analyzer::parse_ytdlp_json;
+use crate::tools::ToolResolver;
+use crate::types::{
     DownloadStrategy, MediaCapabilities, MediaKind, MediaMetadata, MediaSourceType,
     PresetType, ResolverErrorCategory, ResolverErrorDetail, ResolvedMediaSource, TranscodingCost,
 };
-use crate::core::url_validator::validate_media_url;
+use crate::url_validator::validate_media_url;
 
 pub struct UniversalResolver {
     tool_resolver: Arc<ToolResolver>,
@@ -185,7 +185,7 @@ impl UniversalResolver {
 
                     let metadata = MediaMetadata {
                         id: format!("direct_{:x}", md5_hash(&validated_url)),
-                        title: filename.replace('%20', " ").to_string(),
+                        title: filename.replace("%20", " ").to_string(),
                         uploader: None,
                         channel_id: None,
                         uploader_url: None,

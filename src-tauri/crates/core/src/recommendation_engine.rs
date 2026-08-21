@@ -1,4 +1,4 @@
-use crate::core::types::{
+use crate::types::{
     FormatRecommendation, MediaFormatSpec, MediaKind, PresetType, RecommendationConstraints,
     TranscodingCost, UserIntent,
 };

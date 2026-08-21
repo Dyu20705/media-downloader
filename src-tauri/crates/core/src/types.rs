@@ -561,7 +561,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         let default_dir = dirs::download_dir()
-            .or_else(dirs::video_dir())
+            .or_else(|| dirs::video_dir())
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| {
                 if cfg!(windows) {

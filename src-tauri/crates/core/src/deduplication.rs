@@ -1,4 +1,4 @@
-use crate::core::types::{DuplicateCandidate, MediaFingerprint};
+use crate::types::{DuplicateCandidate, MediaFingerprint};
 
 /// P2 Extension Point: Smart Deduplication Engine Domain Boundary
 pub struct DeduplicationEngine;

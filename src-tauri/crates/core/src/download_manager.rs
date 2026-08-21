@@ -4,19 +4,19 @@ use std::time::{Duration, Instant};
 use chrono::Local;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
-use crate::core::diagnostics::DiagnosticsBuffer;
-use crate::core::media_verifier::{resolve_final_download_path, verify_and_inspect_media};
-use crate::core::path_validator::validate_and_ensure_directory;
-use crate::core::presets::compile_download_args;
-use crate::core::process_runner::ProcessHandle;
-use crate::core::progress_parser::{parse_progress_line, ParsedLineEvent};
-use crate::core::settings::SettingsManager;
-use crate::core::state_machine::DownloadStateMachine;
-use crate::core::tools::ToolResolver;
-use crate::core::types::{
+use crate::diagnostics::DiagnosticsBuffer;
+use crate::media_verifier::{resolve_final_download_path, verify_and_inspect_media};
+use crate::path_validator::validate_and_ensure_directory;
+use crate::presets::compile_download_args;
+use crate::process_runner::ProcessHandle;
+use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
+use crate::settings::SettingsManager;
+use crate::state_machine::DownloadStateMachine;
+use crate::tools::ToolResolver;
+use crate::types::{
     DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest,
 };
-use crate::core::url_validator::validate_media_url;
+use crate::url_validator::validate_media_url;
 
 pub struct ActiveJobHandle {
     pub job_id: String,
@@ -103,11 +103,16 @@ impl DownloadManager {
             final_file_name: None,
             final_file_path: None,
             inspection: None,
+            verification: None,
             error_message: None,
             created_at: now_str,
             completed_at: None,
             subtitle_options: None,
             sponsor_block_mode: Some(current_settings.sponsor_block_mode),
+            intent: None,
+            recipe: None,
+            fingerprint: None,
+            explainable_result: None,
         };
 
         // Store initial job in state
@@ -271,7 +276,7 @@ impl DownloadManager {
                                         job.completed_at = Some(Local::now().to_rfc3339());
 
                                         // 1. Generate Media Fingerprint
-                                        let fp = crate::core::fingerprint::FingerprintEngine::generate(
+                                        let fp = crate::fingerprint::FingerprintEngine::generate(
                                             &job.metadata,
                                             Some(&inspection),
                                             None,
@@ -279,7 +284,7 @@ impl DownloadManager {
                                         job.fingerprint = Some(fp);
 
                                         // 2. Generate Verification & Explainable Result
-                                        let (verif, expl) = crate::core::media_verifier::generate_verification_and_explanation(
+                                        let (verif, expl) = crate::media_verifier::generate_verification_and_explanation(
                                             job,
                                             &inspection,
                                             &resolved_file.to_string_lossy(),
@@ -288,7 +293,7 @@ impl DownloadManager {
                                         job.explainable_result = Some(expl);
 
                                         // 3. Create Reproducible Download Recipe
-                                        let recipe = crate::core::recipe::RecipeEngine::create_recipe(
+                                        let recipe = crate::recipe::RecipeEngine::create_recipe(
                                             job,
                                             job.verification.as_ref().map(|v| v.checklist.clone()),
                                         );

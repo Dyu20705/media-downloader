@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use crate::core::types::AppSettings;
+use crate::types::AppSettings;
 
 const SETTINGS_TEMP_SUFFIX: &str = ".tmp";
 const SETTINGS_BACKUP_SUFFIX: &str = ".bak";

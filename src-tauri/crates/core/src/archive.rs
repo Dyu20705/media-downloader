@@ -1,4 +1,4 @@
-use crate::core::types::{ArchivePolicy, DownloadRecipe, MediaFingerprint};
+use crate::types::{ArchivePolicy, DownloadRecipe, MediaFingerprint};
 
 /// P2 Extension Point: Best Available Archive Manager Domain Boundary
 pub struct ArchiveManager {

@@ -1,4 +1,4 @@
-use crate::core::types::{
+use crate::types::{
     AudioStreamSpec, MediaChapter, MediaFormatSpec, MediaKind, MediaMetadata,
     MediaSourceType, OutputMediaArtifact, SourceMediaGraph, SubtitleTrack, ThumbnailSpec,
     VideoStreamSpec,

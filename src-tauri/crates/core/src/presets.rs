@@ -1,4 +1,4 @@
-use crate::core::types::{AppSettings, PresetType};
+use crate::types::{AppSettings, PresetType};
 
 #[derive(Debug, Clone)]
 pub struct CompiledPreset {
@@ -111,20 +111,20 @@ pub fn compile_download_args(
 
     // SponsorBlock support
     match settings.sponsor_block_mode {
-        crate::core::types::SponsorBlockMode::MarkChapters => {
+        crate::types::SponsorBlockMode::MarkChapters => {
             args.push("--sponsorblock-mark".to_string());
             args.push("all".to_string());
         }
-        crate::core::types::SponsorBlockMode::RemoveSegments => {
+        crate::types::SponsorBlockMode::RemoveSegments => {
             args.push("--sponsorblock-remove".to_string());
             args.push("all".to_string());
         }
-        crate::core::types::SponsorBlockMode::Off => {}
+        crate::types::SponsorBlockMode::Off => {}
     }
 
     // Subtitle support
     match settings.subtitle_mode {
-        crate::core::types::SubtitleMode::Embed if !is_audio => {
+        crate::types::SubtitleMode::Embed if !is_audio => {
             args.push("--embed-subs".to_string());
             args.push("--sub-langs".to_string());
             let lang = if settings.preferred_subtitle_language.is_empty() {
@@ -134,7 +134,7 @@ pub fn compile_download_args(
             };
             args.push(lang);
         }
-        crate::core::types::SubtitleMode::DownloadSeparate => {
+        crate::types::SubtitleMode::DownloadSeparate => {
             args.push("--write-subs".to_string());
             args.push("--sub-langs".to_string());
             let lang = if settings.preferred_subtitle_language.is_empty() {
@@ -231,8 +231,8 @@ mod tests {
     #[test]
     fn test_sponsorblock_and_subtitles() {
         let mut settings = AppSettings::default();
-        settings.sponsor_block_mode = crate::core::types::SponsorBlockMode::MarkChapters;
-        settings.subtitle_mode = crate::core::types::SubtitleMode::Embed;
+        settings.sponsor_block_mode = crate::types::SponsorBlockMode::MarkChapters;
+        settings.subtitle_mode = crate::types::SubtitleMode::Embed;
         settings.preferred_subtitle_language = "en,es".to_string();
 
         let compiled = compile_download_args(

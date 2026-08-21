@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::sync::OnceLock;
-use crate::core::types::DownloadProgress;
+use crate::types::DownloadProgress;
 
 static DOWNLOAD_REGEX: OnceLock<Regex> = OnceLock::new();
 static SIZE_SPEED_REGEX: OnceLock<Regex> = OnceLock::new();

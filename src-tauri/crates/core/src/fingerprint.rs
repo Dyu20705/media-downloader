@@ -1,4 +1,4 @@
-use crate::core::types::{
+use crate::types::{
     MediaFingerprint, MediaInspection, MediaMetadata, SourceFingerprint, StreamFingerprint,
 };
 use std::collections::hash_map::DefaultHasher;
@@ -88,7 +88,7 @@ fn chrono_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::MediaKind;
+    use crate::types::MediaKind;
 
     #[test]
     fn test_fingerprint_generation() {

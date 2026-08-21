@@ -1,4 +1,4 @@
-use crate::core::types::{MediaWorkspace, WorkspaceItem};
+use crate::types::{MediaWorkspace, WorkspaceItem};
 
 /// P2 Extension Point: MediaWorkspace Domain Boundary
 pub struct WorkspaceManager;
