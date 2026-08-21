@@ -370,7 +370,7 @@ export default function App() {
     });
 
     return () => {
-      unsubscribe();
+      unsubscribe.then(fn => fn());
     };
   }, [activeJob?.id, activeJob?.status, fetchDiagnostics]);
 
