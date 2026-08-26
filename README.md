@@ -8,10 +8,6 @@
 
 https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
 
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e" width="100%" controls></video>
-</p>
-
 ---
 
 ## Features
