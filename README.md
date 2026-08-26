@@ -8,7 +8,7 @@
 
 <div align="center">
   <video src="assets/demo.mp4" controls width="100%"></video>
-  <p><em>Demo video preview (no audio) &mdash; <a href="assets/demo.mp4">Watch or download raw MP4</a></em></p>
+  <p><em>Demo video preview &mdash; <a href="assets/demo.mp4">Watch</a></em></p>
 </div>
 
 ---
