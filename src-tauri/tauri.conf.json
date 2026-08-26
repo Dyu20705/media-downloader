@@ -51,7 +51,7 @@
   },
   "plugins": {
     "opener": {
-      "default": false
+      
     },
     "dialog": {}
   }

@@ -31,6 +31,12 @@ temp_downloads/
 *.mkv
 *.ts
 
+# Bundles and release packages
+*.zip
+One-Click-Media-Downloader-Linux/
+One-Click-Media-Downloader-Linux.zip
+release/
+
 # Temporary files & logs
 *.part
 *.ytdl
@@ -39,3 +45,4 @@ temp_downloads/
 Thumbs.db
 .env
 !.env.example
+
