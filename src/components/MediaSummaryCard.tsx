@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Clock, 
   ExternalLink, 
@@ -10,7 +10,8 @@ import {
   Music, 
   Globe, 
   Sparkles,
-  Smartphone
+  Smartphone,
+  User
 } from 'lucide-react';
 import { MediaMetadata } from '../types';
 
@@ -21,6 +22,12 @@ interface MediaSummaryCardProps {
 
 export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, onOpenInspector }) => {
   const [imageError, setImageError] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+    setAvatarError(false);
+  }, [metadata?.id, metadata?.thumbnail, metadata?.uploaderAvatar]);
 
   const formatDuration = (seconds?: number | null, isLive?: boolean) => {
     if (isLive) return 'Live Stream';
@@ -108,6 +115,21 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
     : metadata.formats?.find(f => f.vcodec && f.vcodec !== 'none')?.vcodec?.split('.')[0]?.toUpperCase() || (highestRes && highestRes >= 1440 ? 'AV1 / VP9' : 'H.264');
   const audioCodecSummary = metadata.formats?.find(f => f.acodec && f.acodec !== 'none')?.acodec?.split('.')[0]?.toUpperCase() || (isAudio ? 'Source Audio' : 'AAC / Opus');
 
+  const getPlatformGradient = (extractorKey?: string, extractor?: string, sourceType?: string): string => {
+    const key = (extractorKey || extractor || sourceType || '').toLowerCase();
+    if (key.includes('tiktok')) return 'from-rose-950/80 via-zinc-900 to-cyan-950/70';
+    if (key.includes('instagram')) return 'from-fuchsia-950/80 via-pink-950/60 to-amber-950/70';
+    if (key.includes('soundcloud')) return 'from-amber-950/80 via-orange-950/60 to-zinc-950';
+    if (key.includes('reddit')) return 'from-orange-950/80 via-zinc-900 to-zinc-950';
+    if (key.includes('twitter') || key.includes('x')) return 'from-zinc-900 via-slate-900 to-zinc-950';
+    if (key.includes('facebook')) return 'from-blue-950/80 via-indigo-950/60 to-zinc-950';
+    if (key.includes('twitch')) return 'from-purple-950/80 via-zinc-900 to-zinc-950';
+    if (key.includes('hls') || key.includes('stream')) return 'from-emerald-950/80 via-zinc-900 to-zinc-950';
+    return 'from-blue-950/70 via-zinc-900 to-zinc-950';
+  };
+
+  const fallbackGradient = getPlatformGradient(metadata.extractorKey, metadata.extractor, metadata.sourceType);
+
   return (
     <div
       id="media-summary-card"
@@ -124,14 +146,14 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-600 gap-1.5 p-2 text-center">
+          <div className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br ${fallbackGradient} text-zinc-400 gap-1.5 p-3 text-center`}>
             {isAudio ? (
-              <Music className="w-7 h-7 text-indigo-400/80" aria-hidden="true" />
+              <Music className="w-8 h-8 text-amber-400/90" aria-hidden="true" />
             ) : (
-              <Film className="w-7 h-7 text-zinc-600" aria-hidden="true" />
+              <Film className="w-8 h-8 text-blue-400/80" aria-hidden="true" />
             )}
-            <span className="text-[11px] font-medium text-zinc-400">
-              {isAudio ? 'Audio Stream' : 'Media Stream'}
+            <span className="text-[11px] font-semibold text-zinc-200 truncate max-w-[140px]">
+              {platformBadge.name}
             </span>
           </div>
         )}
@@ -187,8 +209,21 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
         {/* Creator & Source Webpage */}
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-zinc-400">
           {metadata.uploader && (
-            <span className="font-medium text-zinc-300 truncate max-w-[200px]" title={metadata.uploader}>
-              {metadata.uploader}
+            <span className="inline-flex items-center gap-1.5 font-medium text-zinc-200 truncate max-w-[240px]" title={metadata.uploader}>
+              {metadata.uploaderAvatar && !avatarError ? (
+                <img
+                  src={metadata.uploaderAvatar}
+                  alt={metadata.uploader}
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
+                  className="w-5 h-5 rounded-full object-cover border border-zinc-700 shrink-0"
+                />
+              ) : (
+                <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-300 flex items-center justify-center text-[10px] font-bold shrink-0">
+                  {metadata.uploader.charAt(0).toUpperCase()}
+                </span>
+              )}
+              <span className="truncate">{metadata.uploader}</span>
             </span>
           )}
           {metadata.uploader && <span>•</span>}

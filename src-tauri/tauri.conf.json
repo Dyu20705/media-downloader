@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "One-Click Media Downloader",
         "width": 980,
         "height": 840,
@@ -28,10 +29,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
+      "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
     "copyright": "Copyright © 2026 One-Click Media Downloader Authors",
@@ -50,9 +52,6 @@
     }
   },
   "plugins": {
-    "opener": {
-      
-    },
-    "dialog": {}
+    "opener": {}
   }
 }

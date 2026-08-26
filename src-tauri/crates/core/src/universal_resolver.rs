@@ -66,8 +66,19 @@ impl UniversalResolver {
         let is_hls_ext = lower_url.contains(".m3u8") || lower_url.contains("m3u8?");
         let is_dash_ext = lower_url.contains(".mpd") || lower_url.contains("mpd?");
 
-        // Step 3: Attempt yt-dlp multi-site extraction with an explicit 15s timeout policy
+        // Step 3: Attempt yt-dlp multi-site extraction with an explicit 45s timeout policy
         let ytdlp_result = self.execute_ytdlp_extraction(&validated_url).await;
+
+        let ytdlp_result = match ytdlp_result {
+            Ok(meta) => Ok(meta),
+            Err(e) => {
+                if validated_url.contains("tiktok.com") {
+                    self.extract_tiktok_direct(&validated_url).await.or(Err(e))
+                } else {
+                    Err(e)
+                }
+            }
+        };
 
         match ytdlp_result {
             Ok(mut metadata) => {
@@ -167,13 +178,28 @@ impl UniversalResolver {
             Err(err_msg) => {
                 // Step 4: Check if direct file fallback is possible
                 if is_direct_ext {
-                    let filename = validated_url
+                    let raw_filename = validated_url
                         .split('/')
                         .last()
                         .unwrap_or("media_file")
                         .split('?')
                         .next()
                         .unwrap_or("media_file");
+
+                    let clean_filename = raw_filename
+                        .replace("%20", " ")
+                        .replace('+', " ");
+
+                    let display_title = if let Some(dot_idx) = clean_filename.rfind('.') {
+                        clean_filename[..dot_idx].trim().to_string()
+                    } else {
+                        clean_filename.trim().to_string()
+                    };
+
+                    let domain_uploader = url::Url::parse(&validated_url)
+                        .ok()
+                        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()));
+
                     let is_audio = lower_url.ends_with(".mp3")
                         || lower_url.ends_with(".m4a")
                         || lower_url.ends_with(".wav")
@@ -185,8 +211,9 @@ impl UniversalResolver {
 
                     let metadata = MediaMetadata {
                         id: format!("direct_{:x}", md5_hash(&validated_url)),
-                        title: filename.replace("%20", " ").to_string(),
-                        uploader: None,
+                        title: display_title,
+                        uploader: domain_uploader.clone(),
+                        uploader_avatar: None,
                         channel_id: None,
                         uploader_url: None,
                         duration: None,
@@ -347,13 +374,17 @@ impl UniversalResolver {
             .await
             .ok_or_else(|| "yt-dlp tool binary not available".to_string())?;
 
-        let timeout_duration = Duration::from_secs(15);
+        let timeout_duration = Duration::from_secs(45);
 
         let process_future = async {
             Command::new(&ytdlp_tool.path)
                 .arg("-J")
                 .arg("--flat-playlist")
                 .arg("--no-warnings")
+                .arg("--user-agent")
+                .arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                .arg("--referer")
+                .arg("https://www.google.com/")
                 .arg(url)
                 .output()
                 .await
@@ -362,7 +393,7 @@ impl UniversalResolver {
 
         let output = timeout(timeout_duration, process_future)
             .await
-            .map_err(|_| "Metadata extraction timed out after 15 seconds".to_string())??;
+            .map_err(|_| "Metadata extraction timed out after 45 seconds. The remote server may be slow or unresponsive.".to_string())??;
 
         if !output.status.success() {
             let stderr_err = String::from_utf8_lossy(&output.stderr);
@@ -376,6 +407,142 @@ impl UniversalResolver {
 
         let json_text = String::from_utf8_lossy(&output.stdout);
         parse_ytdlp_json(&json_text, url)
+    }
+
+    /// Direct fallback parser for TikTok when yt-dlp extractor is challenged or blocked
+    async fn extract_tiktok_direct(&self, url: &str) -> Result<MediaMetadata, String> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+            .build()
+            .map_err(|e| format!("Failed to initialize HTTP client: {}", e))?;
+
+        let resp = client
+            .get(url)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Referer", "https://www.tiktok.com/")
+            .send()
+            .await
+            .map_err(|e| format!("Failed to reach TikTok: {}", e))?;
+
+        let html = resp.text().await.map_err(|e| format!("Failed to read TikTok response: {}", e))?;
+
+        let marker = "__UNIVERSAL_DATA_FOR_REHYDRATION__\" type=\"application/json\">";
+        let start_pos = html.find(marker).ok_or_else(|| "Could not locate TikTok rehydration metadata in page".to_string())? + marker.len();
+        let end_pos = html[start_pos..].find("</script>").ok_or_else(|| "Malformed TikTok script payload".to_string())? + start_pos;
+        let json_str = &html[start_pos..end_pos];
+
+        let val: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Failed to parse TikTok JSON: {}", e))?;
+        let scope = val.get("__DEFAULT_SCOPE__").ok_or_else(|| "Missing default scope in TikTok data".to_string())?;
+        let detail = scope.get("webapp.video-detail").ok_or_else(|| "Video detail not found in TikTok data".to_string())?;
+        let item = detail.get("itemInfo").and_then(|i| i.get("itemStruct")).ok_or_else(|| "Video struct not found (video may be private or removed)".to_string())?;
+
+        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("tiktok_video").to_string();
+        let raw_desc = item.get("desc").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let author = item.get("author");
+        let nickname = author.and_then(|a| a.get("nickname")).and_then(|v| v.as_str()).unwrap_or("");
+        let unique_id = author.and_then(|a| a.get("uniqueId")).and_then(|v| v.as_str()).unwrap_or("");
+        let avatar = author.and_then(|a| a.get("avatarThumb").or_else(|| a.get("avatarLarger"))).and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        let video = item.get("video");
+        let cover = video.and_then(|v| v.get("cover")).and_then(|v| v.as_str()).map(|s| s.to_string());
+        let duration = video.and_then(|v| v.get("duration")).and_then(|v| v.as_f64());
+        let play_addr = video.and_then(|v| v.get("playAddr")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        let uploader_display = if !nickname.is_empty() && !unique_id.is_empty() {
+            Some(format!("{} (@{})", nickname, unique_id))
+        } else if !nickname.is_empty() {
+            Some(nickname.to_string())
+        } else if !unique_id.is_empty() {
+            Some(format!("@{}", unique_id))
+        } else {
+            None
+        };
+
+        let title = if !raw_desc.is_empty() {
+            raw_desc.to_string()
+        } else if let Some(ref u) = uploader_display {
+            format!("TikTok by {}", u)
+        } else {
+            "TikTok Video".to_string()
+        };
+
+        let format_spec = if !play_addr.is_empty() {
+            Some(vec![crate::types::MediaFormatSpec {
+                format_id: "direct_mp4".to_string(),
+                ext: "mp4".to_string(),
+                resolution: Some("1080p".to_string()),
+                width: Some(1080),
+                height: Some(1920),
+                fps: Some(30.0),
+                vcodec: Some("h264".to_string()),
+                acodec: Some("aac".to_string()),
+                filesize: None,
+                filesize_approx: None,
+                tbr: None,
+                vbr: None,
+                abr: None,
+                hdr: Some(false),
+                dynamic_range: None,
+                audio_sample_rate: Some(44100),
+                audio_channels: Some(2),
+            }])
+        } else {
+            None
+        };
+
+        Ok(MediaMetadata {
+            id,
+            title,
+            uploader: uploader_display,
+            uploader_avatar: avatar,
+            channel_id: if !unique_id.is_empty() { Some(unique_id.to_string()) } else { None },
+            uploader_url: if !unique_id.is_empty() { Some(format!("https://www.tiktok.com/@{}", unique_id)) } else { None },
+            duration,
+            thumbnail: cover,
+            webpage_url: url.to_string(),
+            media_kind: MediaKind::Video,
+            upload_date: None,
+            release_timestamp: None,
+            view_count: None,
+            like_count: None,
+            description: Some(raw_desc.to_string()),
+            categories: None,
+            tags: None,
+            language: None,
+            is_live: Some(false),
+            was_live: Some(false),
+            extractor: Some("tiktok".to_string()),
+            extractor_key: Some("TikTok".to_string()),
+            playlist_title: None,
+            playlist_index: None,
+            playlist_count: None,
+            available_resolutions: vec![1080, 720],
+            available_frame_rates: vec![30],
+            has_video: true,
+            has_audio: true,
+            is_hdr: Some(false),
+            subtitles: None,
+            automatic_captions: None,
+            chapters: None,
+            formats: format_spec,
+            smart_recommendation: None,
+            source_type: Some(MediaSourceType::DirectFile),
+            strategy: Some(DownloadStrategy::DirectCopy),
+            transcoding_cost: Some(TranscodingCost::StreamCopy),
+            transcoding_explanation: Some("Fast · Direct TikTok stream copy".to_string()),
+            capabilities: Some(MediaCapabilities {
+                video: true,
+                audio: true,
+                subtitles: false,
+                chapters: false,
+                thumbnails: true,
+                metadata_embedding: true,
+                container_support: vec!["mp4".to_string()],
+                transcoding_required: false,
+            }),
+        })
     }
 
     /// Categorizes raw extractor errors into human-understandable categories
@@ -448,12 +615,12 @@ mod tests {
         assert!(validation.is_ok());
 
         let (strategy, cost, explanation) = UniversalResolver::evaluate_strategy(
-            MediaSourceType::DirectFile,
-            PresetType::Mp4Compatible,
+            &MediaSourceType::DirectFile,
             &MediaMetadata {
                 id: "test".to_string(),
                 title: "BigBuckBunny.mp4".to_string(),
                 uploader: None,
+                uploader_avatar: None,
                 channel_id: None,
                 uploader_url: None,
                 duration: Some(60.0),
@@ -491,6 +658,7 @@ mod tests {
                 transcoding_explanation: None,
                 capabilities: None,
             },
+            &PresetType::Mp4Compatible,
         );
 
         assert_eq!(strategy, DownloadStrategy::DirectCopy);
@@ -502,12 +670,12 @@ mod tests {
     fn test_scenario_c_direct_mp3() {
         let url = "https://example.com/audio/sample_podcast.mp3";
         let (strategy, cost, _) = UniversalResolver::evaluate_strategy(
-            MediaSourceType::DirectFile,
-            PresetType::BestAudio,
+            &MediaSourceType::DirectFile,
             &MediaMetadata {
                 id: "test_audio".to_string(),
                 title: "sample_podcast.mp3".to_string(),
                 uploader: None,
+                uploader_avatar: None,
                 channel_id: None,
                 uploader_url: None,
                 duration: Some(120.0),
@@ -545,6 +713,7 @@ mod tests {
                 transcoding_explanation: None,
                 capabilities: None,
             },
+            &PresetType::BestAudio,
         );
 
         assert_eq!(strategy, DownloadStrategy::DirectCopy);
@@ -554,12 +723,12 @@ mod tests {
     #[test]
     fn test_scenario_d_hls_stream() {
         let (strategy, cost, _) = UniversalResolver::evaluate_strategy(
-            MediaSourceType::Hls,
-            PresetType::BestVideo,
+            &MediaSourceType::Hls,
             &MediaMetadata {
                 id: "test_hls".to_string(),
                 title: "HLS Stream".to_string(),
                 uploader: None,
+                uploader_avatar: None,
                 channel_id: None,
                 uploader_url: None,
                 duration: None,
@@ -597,6 +766,7 @@ mod tests {
                 transcoding_explanation: None,
                 capabilities: None,
             },
+            &PresetType::BestVideo,
         );
 
         assert_eq!(strategy, DownloadStrategy::HlsDownload);
@@ -606,12 +776,12 @@ mod tests {
     #[test]
     fn test_scenario_e_dash_manifest() {
         let (strategy, cost, _) = UniversalResolver::evaluate_strategy(
-            MediaSourceType::Dash,
-            PresetType::BestVideo,
+            &MediaSourceType::Dash,
             &MediaMetadata {
                 id: "test_dash".to_string(),
                 title: "DASH Stream".to_string(),
                 uploader: None,
+                uploader_avatar: None,
                 channel_id: None,
                 uploader_url: None,
                 duration: None,
@@ -649,6 +819,7 @@ mod tests {
                 transcoding_explanation: None,
                 capabilities: None,
             },
+            &PresetType::BestVideo,
         );
 
         assert_eq!(strategy, DownloadStrategy::DashDownload);

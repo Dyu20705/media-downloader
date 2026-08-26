@@ -160,3 +160,46 @@ async fn test_tool_resolver_and_diagnostics() {
     assert!(status.iter().any(|t| t.name == "ffprobe"));
     assert!(status.iter().any(|t| t.name == "mediainfo"));
 }
+
+#[test]
+fn test_cross_platform_metadata_extraction() {
+    // 1. TikTok style payload (creator instead of uploader, thumbnail array)
+    let tiktok_json = r#"{
+        "id": "718291029102",
+        "title": "",
+        "description": "Fun dancing video on the beach #summer #fun",
+        "creator": "dance_star",
+        "thumbnails": [
+            { "id": "sb0", "url": "https://p16.tiktokcdn.com/storyboard.jpg", "width": 100 },
+            { "id": "thumb_low", "url": "https://p16.tiktokcdn.com/low.jpg", "width": 320, "height": 480 },
+            { "id": "thumb_high", "url": "https://p16.tiktokcdn.com/high.jpg", "width": 720, "height": 1280 }
+        ]
+    }"#;
+    let meta_tiktok = parse_ytdlp_json(tiktok_json, "https://www.tiktok.com/@dance_star/video/718291029102").unwrap();
+    assert_eq!(meta_tiktok.uploader, Some("dance_star".to_string()));
+    assert_eq!(meta_tiktok.title, "Fun dancing video on the beach #summer #fun");
+    assert_eq!(meta_tiktok.thumbnail, Some("https://p16.tiktokcdn.com/high.jpg".to_string()));
+
+    // 2. SoundCloud style payload (artist instead of uploader, track as title)
+    let sc_json = r#"{
+        "id": "sc_12345",
+        "track": "Midnight Chill Lofi Beat",
+        "artist": "Lofi Producer",
+        "thumbnail": "https://i1.sndcdn.com/artworks-000123-t500x500.jpg"
+    }"#;
+    let meta_sc = parse_ytdlp_json(sc_json, "https://soundcloud.com/lofi/midnight").unwrap();
+    assert_eq!(meta_sc.uploader, Some("Lofi Producer".to_string()));
+    assert_eq!(meta_sc.title, "Midnight Chill Lofi Beat");
+
+    // 3. Instagram style payload (generic title with description)
+    let ig_json = r#"{
+        "id": "ig_98765",
+        "title": "Instagram post by photog",
+        "description": "Sunset golden hour over Mount Fuji.\nCaptured with 35mm lens.",
+        "channel": "photog_official",
+        "thumbnail": "https://instagram.com/p/photo.jpg"
+    }"#;
+    let meta_ig = parse_ytdlp_json(ig_json, "https://instagram.com/p/ig_98765").unwrap();
+    assert_eq!(meta_ig.uploader, Some("photog_official".to_string()));
+    assert_eq!(meta_ig.title, "Sunset golden hour over Mount Fuji.");
+}

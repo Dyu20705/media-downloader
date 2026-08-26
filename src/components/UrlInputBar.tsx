@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Search, Clipboard, Loader2, Link2, X, Sparkles } from 'lucide-react';
+import { PLATFORM_REGISTRY } from '../config/platformRegistry';
 
 interface UrlInputBarProps {
   url: string;
@@ -8,16 +9,6 @@ interface UrlInputBarProps {
   isAnalyzing: boolean;
   disabled?: boolean;
 }
-
-const SAMPLE_SOURCES = [
-  { name: 'YouTube', url: 'https://www.youtube.com/watch?v=LXb3EKWsInQ' },
-  { name: 'TikTok', url: 'https://www.tiktok.com/@creator/video/73928192831' },
-  { name: 'Instagram', url: 'https://www.instagram.com/reel/C8q7vP1xpL2/' },
-  { name: 'SoundCloud', url: 'https://soundcloud.com/artist/lofi-chill-vibes' },
-  { name: 'Reddit', url: 'https://www.reddit.com/r/videos/comments/x901/nature_timelapse/' },
-  { name: 'Direct MP4', url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4' },
-  { name: 'HLS Live', url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8' }
-];
 
 export const UrlInputBar: React.FC<UrlInputBarProps> = ({
   url,
@@ -127,19 +118,20 @@ export const UrlInputBar: React.FC<UrlInputBarProps> = ({
           <Sparkles className="w-3 h-3 text-blue-400" aria-hidden="true" />
           <span>Quick test:</span>
         </span>
-        {SAMPLE_SOURCES.map((sample) => (
+        {PLATFORM_REGISTRY.map((platform) => (
           <button
-            key={sample.name}
+            key={platform.id}
             type="button"
             disabled={disabled || isAnalyzing}
-            onClick={() => handleSelectSample(sample.url)}
+            onClick={() => handleSelectSample(platform.sampleUrl)}
             className={`px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
-              url === sample.url
+              url === platform.sampleUrl
                 ? 'bg-blue-600/20 text-blue-300 border-blue-500/50'
                 : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-800 hover:border-zinc-700'
             }`}
+            title={platform.description}
           >
-            {sample.name}
+            {platform.name}
           </button>
         ))}
       </div>

@@ -84,9 +84,10 @@ impl ProcessHandle {
 
             #[cfg(unix)]
             {
-                // Kill entire process group on Unix
+                // Kill entire process group and direct process on Unix
                 unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
+                    let _ = libc::kill(-(pid as i32), libc::SIGKILL);
+                    let _ = libc::kill(pid as i32, libc::SIGKILL);
                 }
             }
         }

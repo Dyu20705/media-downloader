@@ -96,6 +96,7 @@ mod tests {
             id: "vid_998".to_string(),
             title: "Nature Documentary".to_string(),
             uploader: None,
+            uploader_avatar: None,
             channel_id: None,
             uploader_url: None,
             duration: Some(120.0),

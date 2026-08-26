@@ -349,7 +349,27 @@ impl ToolManager {
             }
         }
 
-        // Priority 3: Bounded repository search (depth <= 3, e.g. youtube-downloader/)
+        // Priority 3: Application-local managed tool in tools/<tool>/<version>/
+        if let Some(spec) = get_pinned_tool_spec(tool_name) {
+            let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
+            for exe in &exe_names {
+                let managed_path = version_dir.join(exe);
+                if managed_path.exists() {
+                    if let Ok(version) = Self::validate_executable(tool_name, &managed_path).await {
+                        let res = ResolvedExecutable {
+                            name: tool_name.to_string(),
+                            path: managed_path,
+                            version: Some(version),
+                            is_managed: true,
+                        };
+                        self.cache_resolution(tool_name, &res);
+                        return Some(res);
+                    }
+                }
+            }
+        }
+
+        // Priority 4: Bounded repository search (depth <= 3, e.g. youtube-downloader/)
         let mut candidates = Vec::new();
         let yt_dir = self.project_root.join("youtube-downloader");
         if yt_dir.exists() && yt_dir.is_dir() {
@@ -370,7 +390,7 @@ impl ToolManager {
             }
         }
 
-        // Priority 4: System PATH
+        // Priority 5: System PATH (fallback when managed tool is not installed)
         if let Ok(path_var) = std::env::var("PATH") {
             let split_char = if cfg!(windows) { ';' } else { ':' };
             for dir in path_var.split(split_char) {
@@ -388,26 +408,6 @@ impl ToolManager {
                             self.cache_resolution(tool_name, &res);
                             return Some(res);
                         }
-                    }
-                }
-            }
-        }
-
-        // Priority 5: Application-local managed tool in tools/<tool>/<version>/
-        if let Some(spec) = get_pinned_tool_spec(tool_name) {
-            let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
-            for exe in &exe_names {
-                let managed_path = version_dir.join(exe);
-                if managed_path.exists() {
-                    if let Ok(version) = Self::validate_executable(tool_name, &managed_path).await {
-                        let res = ResolvedExecutable {
-                            name: tool_name.to_string(),
-                            path: managed_path,
-                            version: Some(version),
-                            is_managed: true,
-                        };
-                        self.cache_resolution(tool_name, &res);
-                        return Some(res);
                     }
                 }
             }
@@ -501,8 +501,15 @@ impl ToolManager {
                 // If it is managed, verify checksum or executable integrity
                 if tool.is_managed {
                     if let Ok(actual_sha) = Self::compute_sha256(&tool.path) {
-                        // If file is directly pinned binary, check match
-                        if !spec.is_archive && !actual_sha.eq_ignore_ascii_case(expected_sha256) {
+                        let manifest = self.load_manifest();
+                        let is_manifest_match = manifest
+                            .tools
+                            .get(tool_name)
+                            .map(|entry| entry.sha256.eq_ignore_ascii_case(&actual_sha))
+                            .unwrap_or(false);
+
+                        // If file is directly pinned binary and does not match expected nor manifest
+                        if !spec.is_archive && !actual_sha.eq_ignore_ascii_case(expected_sha256) && !is_manifest_match {
                             return ToolStatusInfo {
                                 name: tool_name.to_string(),
                                 status: ToolStatus::Invalid,
@@ -519,21 +526,94 @@ impl ToolManager {
                             };
                         }
                     }
-                }
 
-                ToolStatusInfo {
-                    name: tool_name.to_string(),
-                    status: ToolStatus::Ready,
-                    version: tool.version,
-                    pinned_version: spec.pinned_version.to_string(),
-                    path: Some(tool.path.to_string_lossy().to_string()),
-                    managed: tool.is_managed,
-                    source_url: Some(source_url.to_string()),
-                    sha256: Some(expected_sha256.to_string()),
-                    error_message: None,
-                    license: spec.license.to_string(),
-                    license_url: spec.license_url.to_string(),
-                    is_required: spec.is_required,
+                    ToolStatusInfo {
+                        name: tool_name.to_string(),
+                        status: ToolStatus::Ready,
+                        version: tool.version,
+                        pinned_version: spec.pinned_version.to_string(),
+                        path: Some(tool.path.to_string_lossy().to_string()),
+                        managed: true,
+                        source_url: Some(source_url.to_string()),
+                        sha256: Some(expected_sha256.to_string()),
+                        error_message: None,
+                        license: spec.license.to_string(),
+                        license_url: spec.license_url.to_string(),
+                        is_required: spec.is_required,
+                    }
+                } else {
+                    // Check if a managed directory or manifest entry exists but failed validation
+                    let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
+                    let manifest = self.load_manifest();
+                    if version_dir.exists() || manifest.tools.contains_key(tool_name) {
+                        return ToolStatusInfo {
+                            name: tool_name.to_string(),
+                            status: ToolStatus::Invalid,
+                            version: tool.version,
+                            pinned_version: spec.pinned_version.to_string(),
+                            path: Some(version_dir.to_string_lossy().to_string()),
+                            managed: true,
+                            source_url: Some(source_url.to_string()),
+                            sha256: Some(expected_sha256.to_string()),
+                            error_message: Some("Managed tool executable is damaged or non-executable. Repair required.".to_string()),
+                            license: spec.license.to_string(),
+                            license_url: spec.license_url.to_string(),
+                            is_required: spec.is_required,
+                        };
+                    }
+
+                    // Non-managed (System PATH or unmanaged fallback)
+                    // If the tool executable passed validation, it is operational.
+                    // Only flag yt-dlp as outdated if it is a known legacy build (< 2024.08)
+                    let is_outdated = if tool_name == "yt-dlp" {
+                        match &tool.version {
+                            Some(v) => {
+                                let trimmed = v.trim();
+                                trimmed.starts_with("2021.")
+                                    || trimmed.starts_with("2022.")
+                                    || trimmed.starts_with("2023.")
+                                    || (trimmed.starts_with("2024.")
+                                        && !trimmed.starts_with("2024.08")
+                                        && !trimmed.starts_with("2024.09")
+                                        && !trimmed.starts_with("2024.10")
+                                        && !trimmed.starts_with("2024.11")
+                                        && !trimmed.starts_with("2024.12"))
+                            }
+                            None => false,
+                        }
+                    } else {
+                        false
+                    };
+
+                    let status = if is_outdated {
+                        ToolStatus::Outdated
+                    } else {
+                        ToolStatus::Ready
+                    };
+
+                    let err_msg = if is_outdated {
+                        Some(format!(
+                            "Legacy build detected ({}). YouTube extraction requires a modern build.",
+                            tool.version.as_deref().unwrap_or("unknown")
+                        ))
+                    } else {
+                        None
+                    };
+
+                    ToolStatusInfo {
+                        name: tool_name.to_string(),
+                        status,
+                        version: tool.version,
+                        pinned_version: spec.pinned_version.to_string(),
+                        path: Some(tool.path.to_string_lossy().to_string()),
+                        managed: false,
+                        source_url: Some(source_url.to_string()),
+                        sha256: Some(expected_sha256.to_string()),
+                        error_message: err_msg,
+                        license: spec.license.to_string(),
+                        license_url: spec.license_url.to_string(),
+                        is_required: spec.is_required,
+                    }
                 }
             }
             None => {
@@ -649,6 +729,8 @@ impl ToolManager {
         // Perform download
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
+            .user_agent("OneClickMediaDownloader/1.0 (Linux; x86_64)")
+            .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
@@ -750,35 +832,74 @@ impl ToolManager {
         let staged_bin_path = staging_extract_dir.join(&final_bin_name);
 
         if is_archive {
-            // Extract zip
-            let file = File::open(staged_file).map_err(|e| format!("Failed to open zip archive: {}", e))?;
-            let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to parse zip archive: {}", e))?;
+            let mut extracted = false;
 
-            let mut found_bin = false;
-            for i in 0..archive.len() {
-                let mut zip_file = archive.by_index(i).map_err(|e| format!("Zip entry error: {}", e))?;
-                let enclosed = zip_file.enclosed_name().map(|p| p.to_owned());
-                if let Some(rel_path) = enclosed {
-                    let file_name = rel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if file_name.eq_ignore_ascii_case(&final_bin_name) {
-                        let mut out_file = File::create(&staged_bin_path)
-                            .map_err(|e| format!("Failed to create extracted file: {}", e))?;
-                        std::io::copy(&mut zip_file, &mut out_file)
-                            .map_err(|e| format!("Failed to extract binary from zip: {}", e))?;
-                        found_bin = true;
-                        break;
+            // Try Zip extraction first
+            if let Ok(file) = File::open(staged_file) {
+                if let Ok(mut archive) = zip::ZipArchive::new(file) {
+                    for i in 0..archive.len() {
+                        if let Ok(mut zip_file) = archive.by_index(i) {
+                            let enclosed = zip_file.enclosed_name().map(|p| p.to_owned());
+                            if let Some(rel_path) = enclosed {
+                                let file_name = rel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                                if file_name.eq_ignore_ascii_case(&final_bin_name) {
+                                    if let Ok(mut out_file) = File::create(&staged_bin_path) {
+                                        if std::io::copy(&mut zip_file, &mut out_file).is_ok() {
+                                            extracted = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            if !found_bin {
+            // If not extracted via zip, try system tar on Unix for tar.xz / tar.gz / tar.bz2
+            #[cfg(unix)]
+            if !extracted {
+                let tar_output = Command::new("tar")
+                    .arg("-xf")
+                    .arg(staged_file)
+                    .arg("-C")
+                    .arg(&staging_extract_dir)
+                    .output()
+                    .await;
+
+                if let Ok(out) = tar_output {
+                    if out.status.success() {
+                        let mut found_paths = Vec::new();
+                        Self::find_files_bounded(&staging_extract_dir, &[final_bin_name.clone()], 5, &mut found_paths);
+                        if let Some(first_path) = found_paths.into_iter().next() {
+                            if first_path != staged_bin_path {
+                                let _ = fs::copy(&first_path, &staged_bin_path);
+                            }
+                            extracted = staged_bin_path.exists();
+                        }
+                    }
+                }
+            }
+
+            if !extracted || !staged_bin_path.exists() {
                 let _ = fs::remove_dir_all(&staging_extract_dir);
-                return Err(format!("Binary '{}' not found inside archive", final_bin_name));
+                return Err(format!("Binary '{}' could not be extracted from archive", final_bin_name));
             }
         } else {
             // Direct binary
             fs::copy(staged_file, &staged_bin_path)
                 .map_err(|e| format!("Failed to copy binary to staging: {}", e))?;
+        }
+
+        // Ensure executable permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = fs::metadata(&staged_bin_path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&staged_bin_path, perms);
+            }
         }
 
         // 3. Executable Validation Check
@@ -805,6 +926,17 @@ impl ToolManager {
                 fs::copy(&staged_bin_path, &final_destination).and_then(|_| fs::remove_file(&staged_bin_path))
             })
             .map_err(|e| format!("Failed to activate binary into {:?}: {}", final_destination, e))?;
+
+        // Ensure final destination has executable permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = fs::metadata(&final_destination) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&final_destination, perms);
+            }
+        }
 
         let _ = fs::remove_dir_all(&staging_extract_dir);
 
@@ -863,13 +995,16 @@ impl ToolManager {
         self.install_tool(tool_name).await
     }
 
-    /// Install all missing tools
+    /// Install or upgrade all missing, invalid, or outdated tools
     pub async fn install_all_missing(&self) -> Result<Vec<ToolStatusInfo>, String> {
         let statuses = self.get_all_tool_statuses(None).await;
         let mut results = Vec::new();
 
         for status in statuses {
-            if status.status == ToolStatus::Missing || status.status == ToolStatus::Invalid {
+            if status.status == ToolStatus::Missing 
+                || status.status == ToolStatus::Invalid 
+                || status.status == ToolStatus::Outdated 
+            {
                 match self.install_tool(&status.name).await {
                     Ok(installed) => results.push(installed),
                     Err(e) => {
@@ -895,5 +1030,11 @@ impl ToolManager {
         }
 
         Ok(results)
+    }
+
+    /// Automatically bootstrap required tools on startup if missing or unmanaged
+    pub async fn auto_bootstrap_required_tools(&self) -> Result<Vec<ToolStatusInfo>, String> {
+        self.diagnostics.log("info", "tool_manager", "Checking and auto-bootstrapping required engine tools");
+        self.install_all_missing().await
     }
 }

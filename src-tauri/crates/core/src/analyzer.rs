@@ -53,18 +53,59 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         .unwrap_or("unknown_id")
         .to_string();
 
-    let title = root
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Untitled Media")
-        .to_string();
-
     let uploader = root
         .get("uploader")
+        .or_else(|| root.get("creator"))
         .or_else(|| root.get("channel"))
         .or_else(|| root.get("artist"))
+        .or_else(|| root.get("author"))
+        .or_else(|| root.get("uploader_id"))
+        .or_else(|| root.get("track_artist"))
+        .or_else(|| root.get("album_artist"))
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let raw_title = root
+        .get("title")
+        .or_else(|| root.get("fulltitle"))
+        .or_else(|| root.get("track"))
+        .or_else(|| root.get("alt_title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+
+    let raw_desc = root
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .unwrap_or("");
+
+    let title = if raw_title.is_empty()
+        || raw_title.eq_ignore_ascii_case("untitled")
+        || raw_title.eq_ignore_ascii_case("untitled media")
+        || raw_title.starts_with("Instagram post")
+        || raw_title.starts_with("Post by ")
+        || raw_title.starts_with("Video by ")
+    {
+        if !raw_desc.is_empty() {
+            let first_line = raw_desc.lines().find(|l| !l.trim().is_empty()).unwrap_or(raw_desc);
+            let cleaned = first_line.trim();
+            if cleaned.chars().count() > 100 {
+                format!("{}…", cleaned.chars().take(100).collect::<String>())
+            } else {
+                cleaned.to_string()
+            }
+        } else if !raw_title.is_empty() {
+            raw_title.to_string()
+        } else if let Some(ref auth) = uploader {
+            format!("Media by {}", auth)
+        } else {
+            "Untitled Media".to_string()
+        }
+    } else {
+        raw_title.to_string()
+    };
 
     let channel_id = root
         .get("channel_id")
@@ -78,18 +119,56 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    let uploader_avatar = root
+        .get("channel_avatar")
+        .or_else(|| root.get("uploader_avatar"))
+        .or_else(|| root.get("artist_avatar"))
+        .or_else(|| root.get("avatar_thumb"))
+        .or_else(|| root.get("avatarLarger"))
+        .or_else(|| root.get("avatarMedium"))
+        .or_else(|| root.get("avatarThumb"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            root.get("thumbnails").and_then(|t| t.as_array()).and_then(|arr| {
+                arr.iter().find_map(|t| {
+                    let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = t.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    if id.contains("avatar") || id.contains("channel") || url.contains("/avatar/") {
+                        Some(url)
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
+        .map(|s| s.to_string());
+
     let duration = root.get("duration").and_then(|v| v.as_f64());
 
-    let thumbnail = root
-        .get("thumbnail")
-        .or_else(|| {
-            root.get("thumbnails")
-                .and_then(|t| t.as_array())
-                .and_then(|arr| arr.last())
-                .and_then(|obj| obj.get("url"))
-        })
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+    let thumbnail = {
+        let direct_thumb = root.get("thumbnail").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        if let Some(t) = direct_thumb {
+            Some(t.to_string())
+        } else if let Some(thumbs) = root.get("thumbnails").and_then(|t| t.as_array()) {
+            thumbs.iter()
+                .filter_map(|t| {
+                    let url = t.get("url").and_then(|u| u.as_str())?;
+                    let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                    if id.starts_with("sb") || url.contains("storyboard") {
+                        return None;
+                    }
+                    let width = t.get("width").and_then(|w| w.as_u64()).unwrap_or(0);
+                    let height = t.get("height").and_then(|h| h.as_u64()).unwrap_or(0);
+                    let preference = t.get("preference").and_then(|p| p.as_i64()).unwrap_or(0);
+                    let score = (preference * 1_000_000) + (width * height) as i64;
+                    Some((score, url.to_string()))
+                })
+                .max_by_key(|(score, _)| *score)
+                .map(|(_, url)| url)
+        } else {
+            None
+        }
+    };
 
     let webpage_url = root
         .get("webpage_url")
@@ -329,6 +408,7 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         id,
         title,
         uploader,
+        uploader_avatar,
         channel_id,
         uploader_url,
         duration,

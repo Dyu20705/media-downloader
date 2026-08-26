@@ -32,6 +32,7 @@ temp_downloads/
 *.ts
 
 # Bundles and release packages
+*.AppImage
 *.zip
 One-Click-Media-Downloader-Linux/
 One-Click-Media-Downloader-Linux.zip

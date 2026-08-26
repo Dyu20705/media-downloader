@@ -143,6 +143,14 @@ pub async fn install_all_missing_tools(
 }
 
 #[tauri::command]
+pub async fn auto_bootstrap_tools(
+    state: State<'_, AppState>,
+) -> Result<Vec<ToolStatusInfo>, String> {
+    state.diagnostics.log("INFO", "TOOL_MANAGER", "Running automated engine tools bootstrap");
+    state.tool_resolver.auto_bootstrap_required_tools().await
+}
+
+#[tauri::command]
 pub async fn get_tools_manifest(
     state: State<'_, AppState>,
 ) -> Result<ToolsManifest, String> {

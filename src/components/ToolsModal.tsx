@@ -133,6 +133,11 @@ export const ToolsModal: React.FC<ToolsModalProps> = ({
                           <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
                           Ready
                         </span>
+                      ) : t.status === 'OUTDATED' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" aria-hidden="true" />
+                          Update Available
+                        </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1">
                           <AlertCircle className="w-3 h-3" aria-hidden="true" />
@@ -147,24 +152,31 @@ export const ToolsModal: React.FC<ToolsModalProps> = ({
                           type="button"
                           onClick={() => t.status === 'INVALID' ? handleRepair(t.name) : handleInstall(t.name)}
                           disabled={isBusy}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl font-sans font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-400"
+                          className={`px-3 py-1.5 disabled:opacity-50 text-white rounded-xl font-sans font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer focus-visible:ring-2 ${
+                            t.status === 'OUTDATED'
+                              ? 'bg-amber-600 hover:bg-amber-500 focus-visible:ring-amber-400'
+                              : 'bg-blue-600 hover:bg-blue-500 focus-visible:ring-blue-400'
+                          }`}
                         >
                           {isBusy ? (
                             <RefreshCw className="w-3 h-3 animate-spin" aria-hidden="true" />
                           ) : (
                             <Download className="w-3 h-3" aria-hidden="true" />
                           )}
-                          <span>{t.status === 'INVALID' ? 'Repair' : 'Install'}</span>
+                          <span>
+                            {t.status === 'INVALID' ? 'Repair' : t.status === 'OUTDATED' ? 'Update' : 'Install'}
+                          </span>
                         </button>
                       ) : (
                         <button
                           type="button"
                           onClick={() => handleRepair(t.name)}
                           disabled={isBusy}
-                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500"
+                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 flex items-center gap-1"
                           title="Force reinstallation and integrity recheck"
                         >
-                          Reinstall
+                          {isBusy && <RefreshCw className="w-3 h-3 animate-spin" aria-hidden="true" />}
+                          <span>Reinstall</span>
                         </button>
                       )}
                     </div>
@@ -207,8 +219,8 @@ export const ToolsModal: React.FC<ToolsModalProps> = ({
             <ol className="list-decimal list-inside space-y-0.5 text-[11px] text-zinc-400">
               <li>Configured override path in Settings</li>
               <li>Project-local tool (<code className="text-zinc-300">./bin/</code>, <code className="text-zinc-300">./tools/</code>)</li>
-              <li>System Environment <code className="text-zinc-300">PATH</code></li>
-              <li>Application-local managed directory (<code className="text-zinc-300">%LOCALAPPDATA%\OneClickMediaDownloader\tools\</code>)</li>
+              <li>Application-local managed directory (<code className="text-zinc-300">~/.local/share/...</code> or <code className="text-zinc-300">%LOCALAPPDATA%\...</code>)</li>
+              <li>System Environment <code className="text-zinc-300">PATH</code> (fallback)</li>
             </ol>
           </div>
         </div>
@@ -221,8 +233,12 @@ export const ToolsModal: React.FC<ToolsModalProps> = ({
             disabled={activeAction !== null}
             className="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500"
           >
-            <Download className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Install All Missing</span>
+            {activeAction === 'all' ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" aria-hidden="true" />
+            ) : (
+              <Download className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+            <span>Install / Update All</span>
           </button>
 
           <button

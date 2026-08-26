@@ -127,10 +127,16 @@ impl DownloadManager {
         let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
         let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
 
+        let mut final_args = compiled.arguments.clone();
+        if let Some(ffmpeg_tool) = self.tool_resolver.resolve_tool("ffmpeg").await {
+            final_args.push("--ffmpeg-location".to_string());
+            final_args.push(ffmpeg_tool.path.to_string_lossy().to_string());
+        }
+
         // Spawn process runner
         let mut proc_handle = ProcessHandle::spawn_with_streaming(
             &ytdlp_tool.path,
-            &compiled.arguments,
+            &final_args,
             line_tx,
         )
         .await
@@ -355,7 +361,8 @@ impl DownloadManager {
 
         if let Some(mut job) = self.get_active_job().await {
             if job.id == job_id {
-                job.status = DownloadStatus::Cancelling;
+                job.status = DownloadStatus::Cancelled;
+                job.completed_at = Some(Local::now().to_rfc3339());
                 *self.active_job.write().await = Some(job.clone());
                 return Ok(job);
             }

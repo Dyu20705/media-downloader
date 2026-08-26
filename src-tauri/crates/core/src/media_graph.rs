@@ -121,6 +121,7 @@ mod tests {
             id: "test123".to_string(),
             title: "Test Video".to_string(),
             uploader: None,
+            uploader_avatar: None,
             channel_id: None,
             uploader_url: None,
             duration: Some(180.0),

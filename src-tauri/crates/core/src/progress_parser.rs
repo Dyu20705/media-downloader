@@ -7,7 +7,7 @@ static SIZE_SPEED_REGEX: OnceLock<Regex> = OnceLock::new();
 
 fn get_download_regex() -> &'static Regex {
     DOWNLOAD_REGEX.get_or_init(|| {
-        Regex::new(r"\[download\]\s+([0-9\.]+)%\s+of\s+~?([0-9\.]+\s*[a-zA-Z]+)(?:\s+at\s+([0-9\.]+\s*[a-zA-Z]+/s))?(?:\s+ETA\s+([0-9:]+))?").unwrap()
+        Regex::new(r"\[download\]\s+([0-9\.]+)%\s+of\s+(?:~\s*)?([0-9\.]+\s*[a-zA-Z]+)(?:\s+at\s+([0-9\.]+\s*[a-zA-Z]+/s))?(?:\s+ETA\s+([0-9:]+))?").unwrap()
     })
 }
 

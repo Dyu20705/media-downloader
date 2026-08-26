@@ -10,6 +10,8 @@ interface HeaderProps {
   onOpenTools: () => void;
   onOpenHistory: () => void;
   onOpenHelp: () => void;
+  isUpdatingTools?: boolean;
+  hasToolUpdate?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,6 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTools,
   onOpenHistory,
   onOpenHelp,
+  isUpdatingTools = false,
+  hasToolUpdate = false,
 }) => {
   const readyCount = tools.filter(t => t.available).length;
   const isAllReady = readyCount >= 3;
@@ -68,7 +72,26 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Wrench className="w-3.5 h-3.5 text-zinc-400" aria-hidden="true" />
             <span className="hidden sm:inline">Engine</span>
-            <span className={`w-2 h-2 rounded-full ${isAllReady ? 'bg-emerald-500' : 'bg-amber-500'}`} aria-label={isAllReady ? 'Engine Ready' : 'Engine Needs Setup'} />
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isUpdatingTools
+                  ? 'bg-blue-400 animate-pulse'
+                  : hasToolUpdate
+                  ? 'bg-amber-400'
+                  : isAllReady
+                  ? 'bg-emerald-500'
+                  : 'bg-red-500'
+              }`}
+              aria-label={
+                isUpdatingTools
+                  ? 'Engine Updating'
+                  : hasToolUpdate
+                  ? 'Engine Update Available'
+                  : isAllReady
+                  ? 'Engine Ready'
+                  : 'Engine Needs Setup'
+              }
+            />
           </button>
 
           {/* Diagnostics */}

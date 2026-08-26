@@ -134,6 +134,7 @@ mod tests {
             id: "vid_1".to_string(),
             title: "Test Recipe".to_string(),
             uploader: None,
+            uploader_avatar: None,
             channel_id: None,
             uploader_url: None,
             duration: Some(60.0),

@@ -28,6 +28,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::resolve_media,
@@ -41,6 +42,7 @@ pub fn run() {
             commands::install_tool,
             commands::repair_tool,
             commands::install_all_missing_tools,
+            commands::auto_bootstrap_tools,
             commands::get_tools_manifest,
             commands::get_settings,
             commands::save_settings,

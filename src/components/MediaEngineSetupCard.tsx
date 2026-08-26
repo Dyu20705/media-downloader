@@ -38,6 +38,7 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
   const requiredTools = toolStatuses.filter(t => t.isRequired);
   const allRequiredReady = requiredTools.length > 0 && requiredTools.every(t => t.status === 'READY');
   const hasMissingOrBroken = toolStatuses.some(t => t.status !== 'READY');
+  const hasOutdated = toolStatuses.some(t => t.status === 'OUTDATED');
   const failedTool = toolStatuses.find(t => t.status === 'ERROR' || t.status === 'INVALID');
 
   const handleAction = async (toolName: string, isRepair: boolean) => {
@@ -70,7 +71,9 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
           <div className={`p-2.5 rounded-xl flex-shrink-0 ${
             allRequiredReady 
               ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+              : hasOutdated
+              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+              : 'bg-red-500/10 text-red-400 border border-red-500/20'
           }`}>
             {allRequiredReady ? (
               <ShieldCheck className="w-5 h-5" />
@@ -84,17 +87,23 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
               <h3 className="font-semibold text-zinc-100 text-sm sm:text-base">
                 Media engine
               </h3>
-              {allRequiredReady && (
+              {allRequiredReady ? (
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
                   Ready
                 </span>
-              )}
+              ) : hasOutdated ? (
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20">
+                  Update Available
+                </span>
+              ) : null}
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
               {allRequiredReady
                 ? 'Everything is ready.'
                 : failedTool
                 ? `${failedTool.name} could not be verified or installed.`
+                : hasOutdated
+                ? 'An updated pinned build is recommended for optimal compatibility.'
                 : 'Required media components need setup.'}
             </p>
           </div>
@@ -108,7 +117,11 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
               id="btn-install-all-tools"
               onClick={handleInstallAll}
               disabled={isLoading || actionInProgress !== null}
-              className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className={`px-3.5 py-1.5 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                hasOutdated && !failedTool
+                  ? 'bg-amber-600 hover:bg-amber-500'
+                  : 'bg-red-600 hover:bg-red-500'
+              }`}
             >
               {actionInProgress === 'all' ? (
                 <>
@@ -118,7 +131,7 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
               ) : (
                 <>
                   <Download className="w-3.5 h-3.5" />
-                  <span>{failedTool ? 'Retry Installation' : 'Install Components'}</span>
+                  <span>{failedTool ? 'Retry Installation' : hasOutdated ? 'Update All Components' : 'Install Components'}</span>
                 </>
               )}
             </button>

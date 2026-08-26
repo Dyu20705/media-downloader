@@ -12,6 +12,8 @@ pub enum UrlValidationError {
     MalformedUrl(String),
     #[error("URL exceeds maximum permitted length (2048 characters)")]
     TooLong,
+    #[error("Localhost and private network addresses are prohibited for security")]
+    ProhibitedHost,
 }
 
 pub fn validate_media_url(raw_url: &str) -> Result<String, UrlValidationError> {
@@ -48,8 +50,27 @@ pub fn validate_media_url(raw_url: &str) -> Result<String, UrlValidationError> {
         return Err(UrlValidationError::MalformedUrl("Missing or invalid domain name".to_string()));
     }
 
+    let host = domain_part.split(':').next().unwrap_or("").to_lowercase();
+    if host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host.starts_with("192.168.")
+        || host.starts_with("10.")
+        || (host.starts_with("172.") && {
+            if let Some(second) = host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()) {
+                (16..=31).contains(&second)
+            } else {
+                false
+            }
+        })
+    {
+        return Err(UrlValidationError::ProhibitedHost);
+    }
+
     Ok(trimmed.to_string())
 }
+
+pub use validate_media_url as validate_url;
 
 #[cfg(test)]
 mod tests {

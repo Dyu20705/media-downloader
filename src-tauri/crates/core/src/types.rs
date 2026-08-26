@@ -303,6 +303,7 @@ pub struct MediaMetadata {
     pub id: String,
     pub title: String,
     pub uploader: Option<String>,
+    pub uploader_avatar: Option<String>,
     pub channel_id: Option<String>,
     pub uploader_url: Option<String>,
     pub duration: Option<f64>,

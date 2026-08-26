@@ -74,6 +74,10 @@ impl ToolResolver {
         self.manager.install_all_missing().await
     }
 
+    pub async fn auto_bootstrap_required_tools(&self) -> Result<Vec<ToolStatusInfo>, String> {
+        self.manager.auto_bootstrap_required_tools().await
+    }
+
     pub fn clear_cache(&self) {
         self.manager.clear_cache();
     }
