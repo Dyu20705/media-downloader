@@ -6,10 +6,11 @@
 
 ## 🎬 Demo
 
-<div align="center">
-  <video src="assets/demo.mp4" controls width="100%"></video>
-  <p><em>Demo video preview &mdash; <a href="assets/demo.mp4">Watch</a></em></p>
-</div>
+https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e" width="100%" controls></video>
+</p>
 
 ---
 
