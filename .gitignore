@@ -24,6 +24,7 @@ output/
 temp_downloads/
 *.mp3
 *.mp4
+!assets/*.mp4
 *.m4a
 *.flac
 *.webm
