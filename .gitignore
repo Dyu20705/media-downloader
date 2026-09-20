@@ -48,3 +48,4 @@ release/
 Thumbs.db
 .env
 !.env.example
+

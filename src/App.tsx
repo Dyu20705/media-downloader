@@ -7,6 +7,7 @@ import { RecommendationCard } from './components/RecommendationCard';
 import { FormatSelector } from './components/FormatSelector';
 import { QualityAndDirectory } from './components/QualityAndDirectory';
 import { DownloadProgressState } from './components/DownloadProgressState';
+import { DownloadPlanCard } from './components/DownloadPlanCard';
 
 import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistoryModal } from './components/DownloadHistoryModal';
@@ -22,6 +23,7 @@ import { useMediaAnalysis } from './hooks/useMediaAnalysis';
 import { useRecommendation } from './hooks/useRecommendation';
 import { useDownloadEngine } from './hooks/useDownloadEngine';
 import { useDiagnostics } from './hooks/useDiagnostics';
+import { useDownloadPlan } from './hooks/useDownloadPlan';
 
 import { DownloadJob } from './types';
 import { ipc } from './services/ipc';
@@ -94,6 +96,12 @@ export const App: React.FC = () => {
     resetActiveJob,
     downloadError,
   } = useDownloadEngine({ onDiagnosticsUpdate: fetchDiagnostics });
+
+  const {
+    plan: downloadPlan,
+    isLoading: isDownloadPlanLoading,
+    error: downloadPlanError,
+  } = useDownloadPlan({ metadata, preset, quality });
 
   // Inspection Target for Technical Drawer / Modal
   const [selectedJobForDetails, setSelectedJobForDetails] = useState<DownloadJob | null>(null);
@@ -244,6 +252,16 @@ export const App: React.FC = () => {
             disabled={isJobRunning}
           />
         </section>
+
+        {metadata && (
+          <section aria-label="Download plan">
+            <DownloadPlanCard
+              plan={downloadPlan}
+              isLoading={isDownloadPlanLoading}
+              error={downloadPlanError}
+            />
+          </section>
+        )}
 
         {/* Download Execution & Progress State */}
         <section aria-label="Execution controls" className="pt-2">
