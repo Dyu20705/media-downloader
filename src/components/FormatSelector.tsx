@@ -13,7 +13,7 @@ interface FormatOption {
   id: PresetType;
   title: string;
   subtitle: string;
-  badge?: string;
+  guidance?: string;
 }
 
 const FORMAT_OPTIONS: FormatOption[] = [
@@ -30,17 +30,20 @@ const FORMAT_OPTIONS: FormatOption[] = [
   {
     id: 'best-audio',
     title: 'Best Audio',
-    subtitle: 'Preserve source audio',
+    subtitle: 'Preserve best available source',
+    guidance: 'Preserves the source audio stream when possible, avoiding an unnecessary lossy-to-lossy conversion.',
   },
   {
     id: 'mp3',
     title: 'MP3',
-    subtitle: 'Universal audio',
+    subtitle: 'Universal compatibility · lossy transcode',
+    guidance: 'Converts the source to MP3 using the encoder\'s highest-quality VBR setting. Re-encoding cannot restore detail missing from the source stream.',
   },
   {
     id: 'flac',
     title: 'FLAC',
-    subtitle: 'Lossless container',
+    subtitle: 'FLAC output · no quality restoration',
+    guidance: 'FLAC encoding is lossless relative to decoded audio, but converting a lossy source cannot recover information already discarded upstream.',
   },
 ];
 
@@ -50,6 +53,10 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
   disabled = false,
   recommendation = null,
 }) => {
+  const selectedGuidance = FORMAT_OPTIONS.find(
+    (option) => option.id === selectedPreset,
+  )?.guidance;
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -109,6 +116,12 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
           );
         })}
       </div>
+      {selectedGuidance && (
+        <div className="rounded-lg border border-amber-900/50 bg-amber-950/15 px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+          <span className="font-semibold text-amber-300">Quality note: </span>
+          {selectedGuidance}
+        </div>
+      )}
     </div>
   );
 };

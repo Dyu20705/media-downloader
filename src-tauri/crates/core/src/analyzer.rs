@@ -498,15 +498,16 @@ pub fn generate_smart_recommendation(
     if media_kind == MediaKind::Audio {
         return Some(FormatRecommendation {
             preset: PresetType::BestAudio,
-            label: "Best Audio (Source Copy)".to_string(),
+            label: "Best Audio (Source Preservation)".to_string(),
             target_quality: "auto".to_string(),
-            reason: "Extracts untouched source audio stream (Opus/AAC) without lossy transcoding".to_string(),
+            reason: "Preserves the best available source audio format when possible without lossy transcoding"
+                .to_string(),
             is_transcode_free: true,
-            details: Some("Direct container copy".to_string()),
+            details: Some("Source format preserved when possible".to_string()),
             why_reasons: vec![],
             transcoding_cost: TranscodingCost::NoProcessing,
             estimated_size_bytes: None,
-            container: "m4a/opus".to_string(),
+            container: "source-dependent".to_string(),
         });
     }
 
@@ -654,6 +655,15 @@ mod tests {
         assert_eq!(meta.view_count, None);
         assert_eq!(meta.subtitles, None);
         assert_eq!(meta.chapters, None);
+    }
+
+    #[test]
+    fn test_audio_recommendation_does_not_assume_container() {
+        let recommendation =
+            generate_smart_recommendation(MediaKind::Audio, &[], &[], false, &[]).unwrap();
+
+        assert_eq!(recommendation.preset, PresetType::BestAudio);
+        assert_eq!(recommendation.container, "source-dependent");
     }
 
     #[test]

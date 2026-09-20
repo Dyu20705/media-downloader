@@ -195,54 +195,60 @@ impl RecommendationEngine {
                 if has_flac {
                     FormatRecommendation {
                         preset: PresetType::Flac,
-                        label: "FLAC · Lossless Audio".to_string(),
+                        label: "FLAC · Source Format".to_string(),
                         target_quality: "auto".to_string(),
-                        reason: "Preserve uncompressed lossless audio fidelity".to_string(),
+                        reason: "Keep the available FLAC source in FLAC".to_string(),
                         why_reasons: vec![
-                            "✓ lossless fidelity bit-for-bit".to_string(),
-                            "✓ native studio master preservation".to_string(),
-                            "✓ lossless FLAC container".to_string(),
+                            "✓ source is already FLAC".to_string(),
+                            "✓ no lossy codec conversion requested".to_string(),
+                            "✓ FLAC output retained".to_string(),
                         ],
                         is_transcode_free: true,
                         transcoding_cost: TranscodingCost::StreamCopy,
                         estimated_size_bytes: None,
                         container: "flac".to_string(),
-                        details: Some("Preserves uncompressed audio tracks.".to_string()),
+                        details: Some("Keeps the available FLAC audio in FLAC format.".to_string()),
                     }
                 } else {
                     FormatRecommendation {
                         preset: PresetType::BestAudio,
-                        label: "M4A · Source Audio (Opus/AAC)".to_string(),
+                        label: "Best Audio · Source Format".to_string(),
                         target_quality: "auto".to_string(),
-                        reason: "Preserve original audio bitstream without lossy re-encoding".to_string(),
+                        reason: "Preserve the best available source audio format when possible"
+                            .to_string(),
                         why_reasons: vec![
-                            "✓ original unaltered audio bitstream".to_string(),
-                            "✓ zero generational transcoding loss".to_string(),
+                            "✓ source format preserved when possible".to_string(),
+                            "✓ no unnecessary lossy transcode".to_string(),
                             "✓ highest source bitrate".to_string(),
                         ],
                         is_transcode_free: true,
                         transcoding_cost: TranscodingCost::StreamCopy,
                         estimated_size_bytes: None,
-                        container: "m4a".to_string(),
-                        details: Some("Directly copies native audio stream without recompression.".to_string()),
+                        container: "source-dependent".to_string(),
+                        details: Some(
+                            "Keeps the source codec and extension when possible.".to_string(),
+                        ),
                     }
                 }
             }
             _ => FormatRecommendation {
                 preset: PresetType::BestAudio,
-                label: "M4A · Direct Stream Audio".to_string(),
+                label: "Best Audio · Source Format".to_string(),
                 target_quality: "auto".to_string(),
-                reason: "Direct stream copy of highest bitrate source audio".to_string(),
+                reason: "Preserve the best available source audio format when possible"
+                    .to_string(),
                 why_reasons: vec![
-                    "✓ untouched source stream".to_string(),
-                    "✓ no transcoding required".to_string(),
-                    "✓ fast instant acquisition".to_string(),
+                    "✓ source format preserved when possible".to_string(),
+                    "✓ no unnecessary lossy transcode".to_string(),
+                    "✓ source-dependent codec and extension".to_string(),
                 ],
                 is_transcode_free: true,
                 transcoding_cost: TranscodingCost::StreamCopy,
                 estimated_size_bytes: None,
-                container: "m4a".to_string(),
-                details: Some("Stream copy of source audio without re-encoding.".to_string()),
+                container: "source-dependent".to_string(),
+                details: Some(
+                    "Keeps the source codec and extension when possible.".to_string(),
+                ),
             },
         }
     }
@@ -315,8 +321,12 @@ mod tests {
         );
 
         assert_eq!(rec.preset, PresetType::BestAudio);
+        assert_eq!(rec.container, "source-dependent");
         assert!(rec.is_transcode_free);
         assert_eq!(rec.transcoding_cost, TranscodingCost::StreamCopy);
-        assert!(rec.why_reasons.iter().any(|w| w.contains("zero generational transcoding loss")));
+        assert!(rec
+            .why_reasons
+            .iter()
+            .any(|w| w.contains("source format preserved when possible")));
     }
 }

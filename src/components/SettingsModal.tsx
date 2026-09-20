@@ -93,8 +93,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <option value="mp4-compatible">MP4 — Compatible (Default Video)</option>
               <option value="best-video">Best Video (Highest Quality MKV)</option>
               <option value="best-audio">Best Audio (Source Preservation)</option>
-              <option value="mp3">MP3 (Universal 320 kbps)</option>
-              <option value="flac">FLAC (Lossless)</option>
+              <option value="mp3">MP3 (Universal, Lossy)</option>
+              <option value="flac">FLAC Output</option>
             </select>
           </div>
 

@@ -3,7 +3,6 @@ use crate::types::{AppSettings, PresetType};
 #[derive(Debug, Clone)]
 pub struct CompiledPreset {
     pub arguments: Vec<String>,
-    pub output_extension: String,
     pub is_audio_only: bool,
     pub is_lossy_conversion: bool,
 }
@@ -21,7 +20,7 @@ pub fn compile_download_args(
         preset,
         PresetType::BestAudio | PresetType::Mp3 | PresetType::Flac
     );
-    let is_lossy_conversion = preset == PresetType::Flac;
+    let is_lossy_conversion = preset == PresetType::Mp3;
 
     // Progress & stdout stream configuration
     args.push("--newline".to_string());
@@ -44,7 +43,7 @@ pub fn compile_download_args(
     };
 
     // Format selection & Preset specific flags
-    let (fmt_string, expected_ext) = match preset {
+    match preset {
         PresetType::Mp4Compatible => {
             let f = if quality != "auto" && !quality.is_empty() {
                 format!(
@@ -58,7 +57,6 @@ pub fn compile_download_args(
             args.push(f.clone());
             args.push("--merge-output-format".to_string());
             args.push("mp4".to_string());
-            (f, "mp4".to_string())
         }
         PresetType::BestVideo => {
             let f = if quality != "auto" && !quality.is_empty() {
@@ -70,13 +68,11 @@ pub fn compile_download_args(
             args.push(f.clone());
             args.push("--merge-output-format".to_string());
             args.push("mkv".to_string());
-            (f, "mkv".to_string())
         }
         PresetType::BestAudio => {
             args.push("-f".to_string());
             args.push("bestaudio/b".to_string());
             args.push("-x".to_string());
-            ("bestaudio/b".to_string(), "m4a".to_string())
         }
         PresetType::Mp3 => {
             args.push("-f".to_string());
@@ -86,7 +82,6 @@ pub fn compile_download_args(
             args.push("mp3".to_string());
             args.push("--audio-quality".to_string());
             args.push("0".to_string());
-            ("bestaudio/b".to_string(), "mp3".to_string())
         }
         PresetType::Flac => {
             args.push("-f".to_string());
@@ -94,9 +89,8 @@ pub fn compile_download_args(
             args.push("-x".to_string());
             args.push("--audio-format".to_string());
             args.push("flac".to_string());
-            ("bestaudio/b".to_string(), "flac".to_string())
         }
-    };
+    }
 
     // Metadata & Chapter flags
     if settings.embed_metadata {
@@ -168,7 +162,6 @@ pub fn compile_download_args(
 
     CompiledPreset {
         arguments: args,
-        output_extension: expected_ext,
         is_audio_only: is_audio,
         is_lossy_conversion,
     }
@@ -177,6 +170,12 @@ pub fn compile_download_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
+        arguments
+            .windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == value)
+    }
 
     #[test]
     fn test_mp4_compatible_preset() {
@@ -192,8 +191,50 @@ mod tests {
         assert!(compiled.arguments.contains(&"-f".to_string()));
         assert!(compiled.arguments.iter().any(|a| a.contains("height<=1080")));
         assert!(compiled.arguments.contains(&"--merge-output-format".to_string()));
-        assert!(compiled.arguments.contains(&"mp4".to_string()));
+        assert!(has_arg_pair(
+            &compiled.arguments,
+            "--merge-output-format",
+            "mp4"
+        ));
         assert!(!compiled.is_audio_only);
+    }
+
+    #[test]
+    fn test_best_video_preset() {
+        let settings = AppSettings::default();
+        let compiled = compile_download_args(
+            PresetType::BestVideo,
+            "auto",
+            "/tmp/downloads",
+            "https://example.com/video",
+            &settings,
+        );
+
+        assert!(has_arg_pair(&compiled.arguments, "-f", "bv+ba/b"));
+        assert!(has_arg_pair(
+            &compiled.arguments,
+            "--merge-output-format",
+            "mkv"
+        ));
+        assert!(!compiled.is_audio_only);
+    }
+
+    #[test]
+    fn test_best_audio_preserves_source_format() {
+        let settings = AppSettings::default();
+        let compiled = compile_download_args(
+            PresetType::BestAudio,
+            "auto",
+            "/tmp/downloads",
+            "https://example.com/audio",
+            &settings,
+        );
+
+        assert!(compiled.arguments.contains(&"-x".to_string()));
+        assert!(has_arg_pair(&compiled.arguments, "-f", "bestaudio/b"));
+        assert!(!compiled.arguments.contains(&"--audio-format".to_string()));
+        assert!(compiled.is_audio_only);
+        assert!(!compiled.is_lossy_conversion);
     }
 
     #[test]
@@ -208,13 +249,14 @@ mod tests {
         );
 
         assert!(compiled.arguments.contains(&"-x".to_string()));
-        assert!(compiled.arguments.contains(&"--audio-format".to_string()));
-        assert!(compiled.arguments.contains(&"mp3".to_string()));
+        assert!(has_arg_pair(&compiled.arguments, "--audio-format", "mp3"));
+        assert!(has_arg_pair(&compiled.arguments, "--audio-quality", "0"));
         assert!(compiled.is_audio_only);
+        assert!(compiled.is_lossy_conversion);
     }
 
     #[test]
-    fn test_flac_lossy_warning() {
+    fn test_flac_is_not_marked_as_lossy_conversion() {
         let settings = AppSettings::default();
         let compiled = compile_download_args(
             PresetType::Flac,
@@ -224,8 +266,8 @@ mod tests {
             &settings,
         );
 
-        assert!(compiled.is_lossy_conversion);
-        assert!(compiled.arguments.contains(&"flac".to_string()));
+        assert!(!compiled.is_lossy_conversion);
+        assert!(has_arg_pair(&compiled.arguments, "--audio-format", "flac"));
     }
 
     #[test]

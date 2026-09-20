@@ -324,11 +324,7 @@ async fn inspect_with_ffprobe(
     })
 }
 
-pub fn resolve_final_download_path(
-    output_dir: &Path,
-    media_id: &str,
-    expected_ext: &str,
-) -> Option<PathBuf> {
+pub fn resolve_final_download_path(output_dir: &Path, media_id: &str) -> Option<PathBuf> {
     if !output_dir.exists() {
         return None;
     }

@@ -12,9 +12,9 @@ Choose the preset that matches your goal:
 | :--- | :--- | :--- | :--- |
 | **MP4 (Compatible)** | `.mp4` | H.264 (AVC) + AAC | **Default choice for videos.** Plays smoothly on virtually all TVs, smartphones, tablets, browsers, and editing software (Premiere, Final Cut, DaVinci). |
 | **Best Video** | `.mkv` | VP9 / AV1 / H.265 (Source) + Opus / AAC | **Maximum visual quality.** Retains 4K, 8K, HDR, high frame rates (60fps), and uncompressed metadata in a flexible Matroska container. |
-| **Best Audio** | `.webm` / `.opus` / `.m4a` | Source Audio (Opus / AAC) | **Pure source audio extraction.** Downloads the exact pristine stream provided by the server with zero re-encoding or generational loss. |
-| **MP3 (Universal)** | `.mp3` | MP3 (320 kbps CBR) | **Universal compatibility for audio.** Plays on all car stereos, older MP3 players, and standard audio devices. |
-| **FLAC (Lossless)** | `.flac` | FLAC (Lossless Container) | **Specialized archival audio.** Note: Web streams are natively lossy (Opus/AAC); packaging into FLAC provides lossless container compatibility without improving upstream lossy source bitrate. |
+| **Best Audio** | Source-dependent | Source audio where practical | **Source-preserving audio extraction.** Avoids an unnecessary lossy-to-lossy conversion; the codec and extension depend on the selected source. |
+| **MP3 (Universal)** | `.mp3` | MP3 (lossy VBR) | **Universal compatibility for audio.** Uses the encoder's highest-quality VBR setting but cannot improve the source stream. |
+| **FLAC Output** | `.flac` | FLAC | **Format-specific audio output.** FLAC encoding is lossless at that stage, but transcoding a lossy source cannot restore discarded information. |
 
 ---
 
