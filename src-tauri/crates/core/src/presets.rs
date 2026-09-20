@@ -189,8 +189,13 @@ mod tests {
         );
 
         assert!(compiled.arguments.contains(&"-f".to_string()));
-        assert!(compiled.arguments.iter().any(|a| a.contains("height<=1080")));
-        assert!(compiled.arguments.contains(&"--merge-output-format".to_string()));
+        assert!(compiled
+            .arguments
+            .iter()
+            .any(|a| a.contains("height<=1080")));
+        assert!(compiled
+            .arguments
+            .contains(&"--merge-output-format".to_string()));
         assert!(has_arg_pair(
             &compiled.arguments,
             "--merge-output-format",
@@ -272,10 +277,12 @@ mod tests {
 
     #[test]
     fn test_sponsorblock_and_subtitles() {
-        let mut settings = AppSettings::default();
-        settings.sponsor_block_mode = crate::types::SponsorBlockMode::MarkChapters;
-        settings.subtitle_mode = crate::types::SubtitleMode::Embed;
-        settings.preferred_subtitle_language = "en,es".to_string();
+        let settings = AppSettings {
+            sponsor_block_mode: crate::types::SponsorBlockMode::MarkChapters,
+            subtitle_mode: crate::types::SubtitleMode::Embed,
+            preferred_subtitle_language: "en,es".to_string(),
+            ..AppSettings::default()
+        };
 
         let compiled = compile_download_args(
             PresetType::Mp4Compatible,
@@ -285,7 +292,9 @@ mod tests {
             &settings,
         );
 
-        assert!(compiled.arguments.contains(&"--sponsorblock-mark".to_string()));
+        assert!(compiled
+            .arguments
+            .contains(&"--sponsorblock-mark".to_string()));
         assert!(compiled.arguments.contains(&"--embed-subs".to_string()));
         assert!(compiled.arguments.contains(&"en,es".to_string()));
         assert!(compiled.arguments.contains(&"--embed-chapters".to_string()));

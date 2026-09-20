@@ -1,16 +1,12 @@
-use std::sync::Arc;
 use ocmd_core::analyzer::parse_ytdlp_json;
 use ocmd_core::diagnostics::DiagnosticsBuffer;
-use ocmd_core::path_validator::{
-    sanitize_file_name, validate_and_ensure_directory,
-};
+use ocmd_core::path_validator::{sanitize_file_name, validate_and_ensure_directory};
 use ocmd_core::presets::compile_download_args;
 use ocmd_core::state_machine::DownloadStateMachine;
 use ocmd_core::tools::ToolResolver;
-use ocmd_core::types::{
-    AppSettings, DownloadStatus, MediaKind, PresetType,
-};
+use ocmd_core::types::{AppSettings, DownloadStatus, MediaKind, PresetType};
 use ocmd_core::url_validator::validate_media_url;
+use std::sync::Arc;
 
 fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
     arguments
@@ -188,10 +184,20 @@ fn test_cross_platform_metadata_extraction() {
             { "id": "thumb_high", "url": "https://p16.tiktokcdn.com/high.jpg", "width": 720, "height": 1280 }
         ]
     }"#;
-    let meta_tiktok = parse_ytdlp_json(tiktok_json, "https://www.tiktok.com/@dance_star/video/718291029102").unwrap();
+    let meta_tiktok = parse_ytdlp_json(
+        tiktok_json,
+        "https://www.tiktok.com/@dance_star/video/718291029102",
+    )
+    .unwrap();
     assert_eq!(meta_tiktok.uploader, Some("dance_star".to_string()));
-    assert_eq!(meta_tiktok.title, "Fun dancing video on the beach #summer #fun");
-    assert_eq!(meta_tiktok.thumbnail, Some("https://p16.tiktokcdn.com/high.jpg".to_string()));
+    assert_eq!(
+        meta_tiktok.title,
+        "Fun dancing video on the beach #summer #fun"
+    );
+    assert_eq!(
+        meta_tiktok.thumbnail,
+        Some("https://p16.tiktokcdn.com/high.jpg".to_string())
+    );
 
     // 2. SoundCloud style payload (artist instead of uploader, track as title)
     let sc_json = r#"{

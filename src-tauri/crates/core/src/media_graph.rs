@@ -1,7 +1,6 @@
 use crate::types::{
-    AudioStreamSpec, MediaChapter, MediaFormatSpec, MediaKind, MediaMetadata,
-    MediaSourceType, OutputMediaArtifact, SourceMediaGraph, SubtitleTrack, ThumbnailSpec,
-    VideoStreamSpec,
+    AudioStreamSpec, MediaMetadata, MediaSourceType, OutputMediaArtifact, SourceMediaGraph,
+    ThumbnailSpec, VideoStreamSpec,
 };
 
 pub struct MediaGraph;
@@ -63,7 +62,10 @@ impl MediaGraph {
 
         SourceMediaGraph {
             source_url: metadata.webpage_url.clone(),
-            extractor: metadata.extractor.clone().unwrap_or_else(|| "generic".to_string()),
+            extractor: metadata
+                .extractor
+                .clone()
+                .unwrap_or_else(|| "generic".to_string()),
             source_type,
             title: metadata.title.clone(),
             media_kind: metadata.media_kind,
@@ -78,6 +80,7 @@ impl MediaGraph {
     }
 
     /// Creates a verified OutputMediaArtifact from completed download path & inspection
+    #[allow(clippy::too_many_arguments)]
     pub fn build_output_artifact(
         file_path: &str,
         container: &str,
@@ -114,6 +117,7 @@ impl MediaGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{MediaFormatSpec, MediaKind};
 
     #[test]
     fn test_source_graph_separation() {

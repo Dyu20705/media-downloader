@@ -1,9 +1,8 @@
+use crate::types::DownloadProgress;
 use regex::Regex;
 use std::sync::OnceLock;
-use crate::types::DownloadProgress;
 
 static DOWNLOAD_REGEX: OnceLock<Regex> = OnceLock::new();
-static SIZE_SPEED_REGEX: OnceLock<Regex> = OnceLock::new();
 
 fn get_download_regex() -> &'static Regex {
     DOWNLOAD_REGEX.get_or_init(|| {
@@ -24,7 +23,10 @@ pub fn parse_progress_line(line: &str) -> ParsedLineEvent {
     if trimmed.starts_with("[download]") {
         let re = get_download_regex();
         if let Some(caps) = re.captures(trimmed) {
-            let pct: f64 = caps.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
+            let pct: f64 = caps
+                .get(1)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0.0);
             let total_str = caps.get(2).map(|m| m.as_str()).unwrap_or("");
             let speed_str = caps.get(3).map(|m| m.as_str()).unwrap_or("");
             let eta_str = caps.get(4).map(|m| m.as_str()).unwrap_or("");
@@ -40,11 +42,19 @@ pub fn parse_progress_line(line: &str) -> ParsedLineEvent {
                 total_bytes,
                 speed_bytes_per_sec: speed_bytes,
                 eta_seconds,
-                current_speed: if speed_str.is_empty() { "--".to_string() } else { speed_str.to_string() },
+                current_speed: if speed_str.is_empty() {
+                    "--".to_string()
+                } else {
+                    speed_str.to_string()
+                },
                 raw_status_line: trimmed.to_string(),
             });
         }
-    } else if trimmed.starts_with("[Merger]") || trimmed.starts_with("[ExtractAudio]") || trimmed.starts_with("[FixupM3u8]") || trimmed.starts_with("[EmbedSubtitle]") {
+    } else if trimmed.starts_with("[Merger]")
+        || trimmed.starts_with("[ExtractAudio]")
+        || trimmed.starts_with("[FixupM3u8]")
+        || trimmed.starts_with("[EmbedSubtitle]")
+    {
         return ParsedLineEvent::PostProcessing(trimmed.to_string());
     } else if trimmed.starts_with("[download] Destination:") {
         let dest = trimmed.trim_start_matches("[download] Destination:").trim();
@@ -126,6 +136,9 @@ mod tests {
     #[test]
     fn test_parse_post_processing_merger() {
         let line = "[Merger] Merging formats into \"video.mkv\"";
-        assert!(matches!(parse_progress_line(line), ParsedLineEvent::PostProcessing(_)));
+        assert!(matches!(
+            parse_progress_line(line),
+            ParsedLineEvent::PostProcessing(_)
+        ));
     }
 }

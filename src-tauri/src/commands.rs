@@ -25,7 +25,11 @@ pub async fn resolve_media(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<ResolvedMediaSource, String> {
-    state.diagnostics.log("INFO", "RESOLVER", &format!("Universal resolving URL: {}", url));
+    state.diagnostics.log(
+        "INFO",
+        "RESOLVER",
+        &format!("Universal resolving URL: {}", url),
+    );
     let resolver = UniversalResolver::new(Arc::clone(&state.tool_resolver));
     let result = resolver.resolve(&url).await?;
     state.diagnostics.log(
@@ -44,7 +48,9 @@ pub async fn analyze_media(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<MediaMetadata, String> {
-    state.diagnostics.log("INFO", "IPC", &format!("Analyzing URL: {}", url));
+    state
+        .diagnostics
+        .log("INFO", "IPC", &format!("Analyzing URL: {}", url));
     let resolver = UniversalResolver::new(Arc::clone(&state.tool_resolver));
     let resolved = resolver.resolve(&url).await?;
     if let Some(metadata) = resolved.metadata {
@@ -98,16 +104,12 @@ pub async fn cancel_download(
 }
 
 #[tauri::command]
-pub async fn get_active_job(
-    state: State<'_, AppState>,
-) -> Result<Option<DownloadJob>, String> {
+pub async fn get_active_job(state: State<'_, AppState>) -> Result<Option<DownloadJob>, String> {
     Ok(state.download_manager.get_active_job().await)
 }
 
 #[tauri::command]
-pub async fn get_tool_status(
-    state: State<'_, AppState>,
-) -> Result<Vec<ToolHealth>, String> {
+pub async fn get_tool_status(state: State<'_, AppState>) -> Result<Vec<ToolHealth>, String> {
     Ok(state.tool_resolver.get_all_tools_health().await)
 }
 
@@ -116,7 +118,10 @@ pub async fn get_detailed_tool_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<ToolStatusInfo>, String> {
     let settings = state.settings.get_settings();
-    Ok(state.tool_resolver.get_all_tool_statuses(Some(&settings)).await)
+    Ok(state
+        .tool_resolver
+        .get_all_tool_statuses(Some(&settings))
+        .await)
 }
 
 #[tauri::command]
@@ -146,21 +151,21 @@ pub async fn install_all_missing_tools(
 pub async fn auto_bootstrap_tools(
     state: State<'_, AppState>,
 ) -> Result<Vec<ToolStatusInfo>, String> {
-    state.diagnostics.log("INFO", "TOOL_MANAGER", "Running automated engine tools bootstrap");
+    state.diagnostics.log(
+        "INFO",
+        "TOOL_MANAGER",
+        "Running automated engine tools bootstrap",
+    );
     state.tool_resolver.auto_bootstrap_required_tools().await
 }
 
 #[tauri::command]
-pub async fn get_tools_manifest(
-    state: State<'_, AppState>,
-) -> Result<ToolsManifest, String> {
+pub async fn get_tools_manifest(state: State<'_, AppState>) -> Result<ToolsManifest, String> {
     Ok(state.tool_resolver.manager().load_manifest())
 }
 
 #[tauri::command]
-pub async fn get_settings(
-    state: State<'_, AppState>,
-) -> Result<AppSettings, String> {
+pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
     Ok(state.settings.get_settings())
 }
 
@@ -173,16 +178,12 @@ pub async fn save_settings(
 }
 
 #[tauri::command]
-pub async fn get_diagnostics(
-    state: State<'_, AppState>,
-) -> Result<Vec<DiagnosticLog>, String> {
+pub async fn get_diagnostics(state: State<'_, AppState>) -> Result<Vec<DiagnosticLog>, String> {
     Ok(state.diagnostics.get_logs())
 }
 
 #[tauri::command]
-pub async fn clear_diagnostics(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn clear_diagnostics(state: State<'_, AppState>) -> Result<(), String> {
     state.diagnostics.clear();
     Ok(())
 }

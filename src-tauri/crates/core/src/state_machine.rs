@@ -1,5 +1,5 @@
-use thiserror::Error;
 use crate::types::DownloadStatus;
+use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum StateMachineError {
@@ -13,6 +13,12 @@ pub enum StateMachineError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DownloadStateMachine {
     current: DownloadStatus,
+}
+
+impl Default for DownloadStateMachine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DownloadStateMachine {
@@ -69,9 +75,7 @@ impl DownloadStateMachine {
             ),
             DownloadStatus::PostProcessing => matches!(
                 to,
-                DownloadStatus::Verifying
-                    | DownloadStatus::Failed
-                    | DownloadStatus::Cancelling
+                DownloadStatus::Verifying | DownloadStatus::Failed | DownloadStatus::Cancelling
             ),
             DownloadStatus::Verifying => {
                 matches!(to, DownloadStatus::Completed | DownloadStatus::Failed)

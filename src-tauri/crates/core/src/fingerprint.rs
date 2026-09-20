@@ -14,7 +14,10 @@ impl FingerprintEngine {
         file_hash: Option<String>,
     ) -> MediaFingerprint {
         let source_fp = SourceFingerprint {
-            extractor: metadata.extractor.clone().unwrap_or_else(|| "generic".to_string()),
+            extractor: metadata
+                .extractor
+                .clone()
+                .unwrap_or_else(|| "generic".to_string()),
             source_url: metadata.webpage_url.clone(),
             source_id: metadata.id.clone(),
             title: metadata.title.clone(),
@@ -81,7 +84,9 @@ impl FingerprintEngine {
 fn chrono_timestamp() -> String {
     // Standard RFC3339 timestamp format without external chrono dependency
     use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{}.{:03}Z", dur.as_secs(), dur.subsec_millis())
 }
 

@@ -1,12 +1,12 @@
-use serde_json::Value;
-use std::sync::Arc;
-use tokio::process::Command;
 use crate::tools::ToolResolver;
 use crate::types::{
     FormatRecommendation, MediaChapter, MediaFormatSpec, MediaKind, MediaMetadata, PresetType,
     SubtitleTrack, TranscodingCost,
 };
 use crate::url_validator::validate_media_url;
+use serde_json::Value;
+use std::sync::Arc;
+use tokio::process::Command;
 
 pub async fn analyze_media_metadata(
     url: &str,
@@ -34,7 +34,12 @@ pub async fn analyze_media_metadata(
         let first_err = stderr_err
             .lines()
             .find(|l| l.contains("ERROR:"))
-            .unwrap_or(stderr_err.lines().next().unwrap_or("Unknown analysis failure"))
+            .unwrap_or(
+                stderr_err
+                    .lines()
+                    .next()
+                    .unwrap_or("Unknown analysis failure"),
+            )
             .trim();
         return Err(format!("yt-dlp analysis error: {}", first_err));
     }
@@ -89,7 +94,10 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         || raw_title.starts_with("Video by ")
     {
         if !raw_desc.is_empty() {
-            let first_line = raw_desc.lines().find(|l| !l.trim().is_empty()).unwrap_or(raw_desc);
+            let first_line = raw_desc
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or(raw_desc);
             let cleaned = first_line.trim();
             if cleaned.chars().count() > 100 {
                 format!("{}…", cleaned.chars().take(100).collect::<String>())
@@ -129,28 +137,37 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         .or_else(|| root.get("avatarThumb"))
         .and_then(|v| v.as_str())
         .or_else(|| {
-            root.get("thumbnails").and_then(|t| t.as_array()).and_then(|arr| {
-                arr.iter().find_map(|t| {
-                    let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let url = t.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                    if id.contains("avatar") || id.contains("channel") || url.contains("/avatar/") {
-                        Some(url)
-                    } else {
-                        None
-                    }
+            root.get("thumbnails")
+                .and_then(|t| t.as_array())
+                .and_then(|arr| {
+                    arr.iter().find_map(|t| {
+                        let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let url = t.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                        if id.contains("avatar")
+                            || id.contains("channel")
+                            || url.contains("/avatar/")
+                        {
+                            Some(url)
+                        } else {
+                            None
+                        }
+                    })
                 })
-            })
         })
         .map(|s| s.to_string());
 
     let duration = root.get("duration").and_then(|v| v.as_f64());
 
     let thumbnail = {
-        let direct_thumb = root.get("thumbnail").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let direct_thumb = root
+            .get("thumbnail")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
         if let Some(t) = direct_thumb {
             Some(t.to_string())
         } else if let Some(thumbs) = root.get("thumbnails").and_then(|t| t.as_array()) {
-            thumbs.iter()
+            thumbs
+                .iter()
                 .filter_map(|t| {
                     let url = t.get("url").and_then(|u| u.as_str())?;
                     let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("");
@@ -200,14 +217,11 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
                 .collect()
         });
 
-    let tags = root
-        .get("tags")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|t| t.as_str().map(|s| s.to_string()))
-                .collect()
-        });
+    let tags = root.get("tags").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|t| t.as_str().map(|s| s.to_string()))
+            .collect()
+    });
 
     let language = root
         .get("language")
@@ -236,8 +250,14 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let playlist_index = root.get("playlist_index").and_then(|v| v.as_u64()).map(|u| u as u32);
-    let playlist_count = root.get("playlist_count").and_then(|v| v.as_u64()).map(|u| u as u32);
+    let playlist_index = root
+        .get("playlist_index")
+        .and_then(|v| v.as_u64())
+        .map(|u| u as u32);
+    let playlist_count = root
+        .get("playlist_count")
+        .and_then(|v| v.as_u64())
+        .map(|u| u as u32);
 
     // Subtitles extraction
     let subtitles = parse_subtitles_map(root.get("subtitles"), false);
@@ -250,7 +270,10 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
             .iter()
             .filter_map(|ch| {
                 let start_time = ch.get("start_time").and_then(|v| v.as_f64())?;
-                let end_time = ch.get("end_time").and_then(|v| v.as_f64()).unwrap_or(start_time);
+                let end_time = ch
+                    .get("end_time")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(start_time);
                 let ch_title = ch
                     .get("title")
                     .and_then(|v| v.as_str())
@@ -340,7 +363,7 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
                     }
                     if let Some(f) = fps {
                         let rounded_fps = f.round() as u32;
-                        if rounded_fps >= 10 && rounded_fps <= 240 {
+                        if (10..=240).contains(&rounded_fps) {
                             frame_rates.push(rounded_fps);
                         }
                     }
@@ -396,13 +419,8 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
     };
 
     // Calculate smart recommendation
-    let smart_recommendation = generate_smart_recommendation(
-        media_kind,
-        &heights,
-        &frame_rates,
-        is_hdr,
-        &parsed_formats,
-    );
+    let smart_recommendation =
+        generate_smart_recommendation(media_kind, &heights, &frame_rates, is_hdr, &parsed_formats);
 
     Ok(MediaMetadata {
         id,
@@ -516,7 +534,11 @@ pub fn generate_smart_recommendation(
 
     // Check if high-resolution (4K/8K) or HDR
     if max_res >= 1440 || is_hdr {
-        let fps_label = if max_fps > 30 { format!("{}fps ", max_fps) } else { "".to_string() };
+        let fps_label = if max_fps > 30 {
+            format!("{}fps ", max_fps)
+        } else {
+            "".to_string()
+        };
         let hdr_label = if is_hdr { " HDR" } else { "" };
         return Some(FormatRecommendation {
             preset: PresetType::BestVideo,
@@ -537,24 +559,34 @@ pub fn generate_smart_recommendation(
     let has_native_mp4_h264 = formats.iter().any(|f| {
         let vc = f.vcodec.as_deref().unwrap_or("");
         let ext = f.ext.as_str();
-        (ext == "mp4" || vc.starts_with("avc1") || vc.starts_with("h264")) && f.height.unwrap_or(0) >= max_res
+        (ext == "mp4" || vc.starts_with("avc1") || vc.starts_with("h264"))
+            && f.height.unwrap_or(0) >= max_res
     });
 
-    let fps_suffix = if max_fps > 30 { format!("{} ", max_fps) } else { "".to_string() };
+    let fps_suffix = if max_fps > 30 {
+        format!("{} ", max_fps)
+    } else {
+        "".to_string()
+    };
 
     Some(FormatRecommendation {
         preset: PresetType::Mp4Compatible,
         label: format!("MP4 · {}p{}", max_res, fps_suffix),
         target_quality: max_res.to_string(),
         reason: if has_native_mp4_h264 {
-            "Direct stream copy with broad playback compatibility on phones, tablets, and TVs".to_string()
+            "Direct stream copy with broad playback compatibility on phones, tablets, and TVs"
+                .to_string()
         } else {
             "Broad compatibility across all modern video players and devices".to_string()
         },
         is_transcode_free: has_native_mp4_h264,
         details: Some("Universal H.264 / AAC MP4 container".to_string()),
         why_reasons: vec![],
-        transcoding_cost: if has_native_mp4_h264 { TranscodingCost::Merge } else { TranscodingCost::Transcode },
+        transcoding_cost: if has_native_mp4_h264 {
+            TranscodingCost::Merge
+        } else {
+            TranscodingCost::Transcode
+        },
         estimated_size_bytes: None,
         container: "mp4".to_string(),
     })
@@ -605,7 +637,8 @@ mod tests {
             ]
         }"#;
 
-        let meta = parse_ytdlp_json(sample_json, "https://www.youtube.com/watch?v=LXb3EKWsInQ").unwrap();
+        let meta =
+            parse_ytdlp_json(sample_json, "https://www.youtube.com/watch?v=LXb3EKWsInQ").unwrap();
         assert_eq!(meta.id, "LXb3EKWsInQ");
         assert_eq!(meta.title, "COSTA RICA IN 4K 60fps HDR");
         assert_eq!(meta.uploader, Some("Jacob + Katie Schwarz".to_string()));

@@ -1,7 +1,7 @@
+use crate::types::DiagnosticLog;
+use chrono::Local;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
-use chrono::Local;
-use crate::types::DiagnosticLog;
 
 const MAX_LOG_LINES: usize = 256;
 const MAX_TOTAL_BYTES: usize = 64 * 1024; // <= 64 KiB retained text
@@ -10,6 +10,12 @@ const MAX_TOTAL_BYTES: usize = 64 * 1024; // <= 64 KiB retained text
 pub struct DiagnosticsBuffer {
     logs: Arc<RwLock<VecDeque<DiagnosticLog>>>,
     retained_bytes: Arc<RwLock<usize>>,
+}
+
+impl Default for DiagnosticsBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DiagnosticsBuffer {
@@ -33,11 +39,13 @@ impl DiagnosticsBuffer {
             message: sanitized,
         };
 
-        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write()) {
+        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write())
+        {
             // Trim by line count
             while lock.len() >= MAX_LOG_LINES {
                 if let Some(removed) = lock.pop_front() {
-                    let removed_len = removed.message.len() + removed.level.len() + removed.source.len() + 32;
+                    let removed_len =
+                        removed.message.len() + removed.level.len() + removed.source.len() + 32;
                     *bytes_lock = bytes_lock.saturating_sub(removed_len);
                 }
             }
@@ -45,7 +53,8 @@ impl DiagnosticsBuffer {
             // Trim by total retained memory bytes (<= 64 KiB)
             while *bytes_lock + msg_len > MAX_TOTAL_BYTES && !lock.is_empty() {
                 if let Some(removed) = lock.pop_front() {
-                    let removed_len = removed.message.len() + removed.level.len() + removed.source.len() + 32;
+                    let removed_len =
+                        removed.message.len() + removed.level.len() + removed.source.len() + 32;
                     *bytes_lock = bytes_lock.saturating_sub(removed_len);
                 }
             }
@@ -63,7 +72,8 @@ impl DiagnosticsBuffer {
     }
 
     pub fn clear(&self) {
-        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write()) {
+        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write())
+        {
             lock.clear();
             *bytes_lock = 0;
         }

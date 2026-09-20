@@ -1,13 +1,9 @@
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::PathBuf;
+use std::fs;
 use std::sync::Arc;
 use tempfile::tempdir;
 
 use ocmd_core::diagnostics::DiagnosticsBuffer;
-use ocmd_core::tool_manager::{
-    get_pinned_tool_spec, ToolManager, PINNED_TOOLS,
-};
+use ocmd_core::tool_manager::{get_pinned_tool_spec, ToolManager, PINNED_TOOLS};
 use ocmd_core::types::{AppSettings, ToolStatus};
 
 #[test]
@@ -65,7 +61,10 @@ async fn test_installation_atomicity_and_staging_cleanup() {
 
     // Initial state before managed install must not be managed
     let status_before = manager.check_tool_status("yt-dlp", None).await;
-    assert!(!status_before.managed, "Tool should not be managed before install");
+    assert!(
+        !status_before.managed,
+        "Tool should not be managed before install"
+    );
 
     // Create a mock executable script/binary
     let mock_binary: &[u8] = if cfg!(windows) {
@@ -82,8 +81,14 @@ async fn test_installation_atomicity_and_staging_cleanup() {
     };
 
     // Install using atomic byte installer
-    let install_result = manager.install_from_bytes("yt-dlp", mock_binary, &mock_hash, false).await;
-    assert!(install_result.is_ok(), "Installation should succeed: {:?}", install_result.err());
+    let install_result = manager
+        .install_from_bytes("yt-dlp", mock_binary, &mock_hash, false)
+        .await;
+    assert!(
+        install_result.is_ok(),
+        "Installation should succeed: {:?}",
+        install_result.err()
+    );
 
     let status_after = install_result.unwrap();
     assert_eq!(status_after.status, ToolStatus::Ready);
@@ -94,7 +99,11 @@ async fn test_installation_atomicity_and_staging_cleanup() {
     let staging_dir = manager.get_staging_dir();
     if staging_dir.exists() {
         let entries: Vec<_> = fs::read_dir(&staging_dir).unwrap().collect();
-        assert_eq!(entries.len(), 0, "Staging directory must be empty after installation");
+        assert_eq!(
+            entries.len(),
+            0,
+            "Staging directory must be empty after installation"
+        );
     }
 
     // Verify manifest.json was atomically committed
@@ -116,15 +125,26 @@ async fn test_corrupted_binary_rejection_and_staging_safety() {
     let expected_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
 
     // Attempt install with mismatching hash
-    let result = manager.install_from_bytes("yt-dlp", mock_binary, expected_hash, false).await;
-    assert!(result.is_err(), "Installation with wrong checksum must fail");
+    let result = manager
+        .install_from_bytes("yt-dlp", mock_binary, expected_hash, false)
+        .await;
+    assert!(
+        result.is_err(),
+        "Installation with wrong checksum must fail"
+    );
 
     // Verify corrupt file NEVER became active
     let manifest = manager.load_manifest();
-    assert!(!manifest.tools.contains_key("yt-dlp"), "Corrupt install must not be in manifest");
+    assert!(
+        !manifest.tools.contains_key("yt-dlp"),
+        "Corrupt install must not be in manifest"
+    );
 
     let status = manager.check_tool_status("yt-dlp", None).await;
-    assert!(!status.managed, "Corrupt binary must not be marked as managed");
+    assert!(
+        !status.managed,
+        "Corrupt binary must not be marked as managed"
+    );
 
     // Verify staging temp files are cleaned up
     let staging_dir = manager.get_staging_dir();
@@ -142,7 +162,11 @@ async fn test_resolution_order_priority() {
 
     // 1. Test explicit configured path in AppSettings
     let explicit_dir = tempdir().unwrap();
-    let custom_exe_name = if cfg!(windows) { "custom_yt.exe" } else { "custom_yt" };
+    let custom_exe_name = if cfg!(windows) {
+        "custom_yt.exe"
+    } else {
+        "custom_yt"
+    };
     let custom_exe_path = explicit_dir.path().join(custom_exe_name);
 
     if cfg!(windows) {
@@ -158,8 +182,10 @@ async fn test_resolution_order_priority() {
         }
     }
 
-    let mut settings = AppSettings::default();
-    settings.custom_ytdlp_path = Some(custom_exe_path.to_string_lossy().to_string());
+    let settings = AppSettings {
+        custom_ytdlp_path: Some(custom_exe_path.to_string_lossy().to_string()),
+        ..AppSettings::default()
+    };
 
     let resolved = manager.resolve_tool("yt-dlp", Some(&settings)).await;
     assert!(resolved.is_some());
@@ -188,13 +214,20 @@ async fn test_reinstall_and_repair_flow() {
     };
 
     // Install initial version
-    manager.install_from_bytes("yt-dlp", mock_binary, &mock_hash, false).await.unwrap();
+    manager
+        .install_from_bytes("yt-dlp", mock_binary, &mock_hash, false)
+        .await
+        .unwrap();
     let status_1 = manager.check_tool_status("yt-dlp", None).await;
     assert_eq!(status_1.status, ToolStatus::Ready);
 
     // Corrupt active binary
     let target_dir = manager.get_version_dir("yt-dlp", "2025.02.19");
-    let bin_name = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+    let bin_name = if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    };
     let active_bin = target_dir.join(bin_name);
     fs::write(&active_bin, b"invalid corrupted data").unwrap();
     manager.clear_cache();
@@ -205,7 +238,9 @@ async fn test_reinstall_and_repair_flow() {
     assert!(status_corrupted.error_message.is_some());
 
     // Repair tool
-    let repair_res = manager.install_from_bytes("yt-dlp", mock_binary, &mock_hash, false).await;
+    let repair_res = manager
+        .install_from_bytes("yt-dlp", mock_binary, &mock_hash, false)
+        .await;
     assert!(repair_res.is_ok());
     let status_repaired = manager.check_tool_status("yt-dlp", None).await;
     assert_eq!(status_repaired.status, ToolStatus::Ready);

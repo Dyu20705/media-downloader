@@ -1,12 +1,12 @@
 pub mod commands;
 pub use ocmd_core as core;
 
-use std::sync::Arc;
 use commands::AppState;
 use core::diagnostics::DiagnosticsBuffer;
 use core::download_manager::DownloadManager;
 use core::settings::SettingsManager;
 use core::tools::ToolResolver;
+use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

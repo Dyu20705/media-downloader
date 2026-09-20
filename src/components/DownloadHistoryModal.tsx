@@ -18,11 +18,11 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const handleOpenFolder = async (path?: string) => {
+  const handleOpenFolder = async (path?: string | null) => {
     if (path) await ipc.openFolder(path);
   };
 
-  const handleOpenFile = async (path?: string) => {
+  const handleOpenFile = async (path?: string | null) => {
     if (path) await ipc.openFile(path);
   };
 

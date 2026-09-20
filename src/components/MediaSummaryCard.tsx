@@ -29,7 +29,7 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
     setAvatarError(false);
   }, [metadata?.id, metadata?.thumbnail, metadata?.uploaderAvatar]);
 
-  const formatDuration = (seconds?: number | null, isLive?: boolean) => {
+  const formatDuration = (seconds?: number | null, isLive?: boolean | null) => {
     if (isLive) return 'Live Stream';
     if (seconds === null || seconds === undefined) return 'Dynamic Duration';
     if (seconds < 0) return 'Dynamic Duration';
@@ -45,7 +45,7 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getSourceBadge = (extractorKey?: string, extractor?: string, sourceType?: string): { name: string; color: string } => {
+  const getSourceBadge = (extractorKey?: string | null, extractor?: string | null, sourceType?: string | null): { name: string; color: string } => {
     const key = (extractorKey || extractor || sourceType || '').toLowerCase();
     
     if (key.includes('tiktok')) return { name: 'TikTok', color: 'bg-rose-950/70 text-rose-300 border-rose-800/60' };
@@ -69,7 +69,7 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
     return { name: extractorKey || extractor || 'Web Stream', color: 'bg-zinc-800 text-zinc-300 border-zinc-700' };
   };
 
-  const getSourceDomain = (webpageUrl: string, extractor?: string): string => {
+  const getSourceDomain = (webpageUrl: string, extractor?: string | null): string => {
     if (extractor && extractor.toLowerCase() === 'youtube') return 'YouTube';
     try {
       const url = new URL(webpageUrl);
@@ -115,7 +115,7 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
     : metadata.formats?.find(f => f.vcodec && f.vcodec !== 'none')?.vcodec?.split('.')[0]?.toUpperCase() || (highestRes && highestRes >= 1440 ? 'AV1 / VP9' : 'H.264');
   const audioCodecSummary = metadata.formats?.find(f => f.acodec && f.acodec !== 'none')?.acodec?.split('.')[0]?.toUpperCase() || (isAudio ? 'Source Audio' : 'AAC / Opus');
 
-  const getPlatformGradient = (extractorKey?: string, extractor?: string, sourceType?: string): string => {
+  const getPlatformGradient = (extractorKey?: string | null, extractor?: string | null, sourceType?: string | null): string => {
     const key = (extractorKey || extractor || sourceType || '').toLowerCase();
     if (key.includes('tiktok')) return 'from-rose-950/80 via-zinc-900 to-cyan-950/70';
     if (key.includes('instagram')) return 'from-fuchsia-950/80 via-pink-950/60 to-amber-950/70';
@@ -311,4 +311,3 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
     </div>
   );
 };
-

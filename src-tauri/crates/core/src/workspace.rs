@@ -7,7 +7,9 @@ impl WorkspaceManager {
     pub fn create_workspace(name: &str) -> MediaWorkspace {
         let now = {
             use std::time::{SystemTime, UNIX_EPOCH};
-            let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+            let dur = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default();
             format!("{}.{:03}Z", dur.as_secs(), dur.subsec_millis())
         };
 

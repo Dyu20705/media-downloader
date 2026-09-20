@@ -6,8 +6,8 @@ use tokio::time::timeout;
 use crate::analyzer::parse_ytdlp_json;
 use crate::tools::ToolResolver;
 use crate::types::{
-    DownloadStrategy, MediaCapabilities, MediaKind, MediaMetadata, MediaSourceType,
-    PresetType, ResolverErrorCategory, ResolverErrorDetail, ResolvedMediaSource, TranscodingCost,
+    DownloadStrategy, MediaCapabilities, MediaKind, MediaMetadata, MediaSourceType, PresetType,
+    ResolvedMediaSource, ResolverErrorCategory, ResolverErrorDetail, TranscodingCost,
 };
 use crate::url_validator::validate_media_url;
 
@@ -83,12 +83,25 @@ impl UniversalResolver {
         match ytdlp_result {
             Ok(mut metadata) => {
                 // Determine Source Type based on yt-dlp extractor output
-                let raw_extractor = metadata.extractor.clone().unwrap_or_default().to_lowercase();
+                let raw_extractor = metadata
+                    .extractor
+                    .clone()
+                    .unwrap_or_default()
+                    .to_lowercase();
                 let is_generic = raw_extractor == "generic" || raw_extractor.is_empty();
 
-                let source_type = if is_hls_ext || (metadata.formats.as_ref().map_or(false, |fmts| fmts.iter().any(|f| f.format_id.contains("hls") || f.ext == "m3u8"))) {
+                let source_type = if is_hls_ext
+                    || (metadata.formats.as_ref().is_some_and(|fmts| {
+                        fmts.iter()
+                            .any(|f| f.format_id.contains("hls") || f.ext == "m3u8")
+                    })) {
                     MediaSourceType::Hls
-                } else if is_dash_ext || (metadata.formats.as_ref().map_or(false, |fmts| fmts.iter().any(|f| f.format_id.contains("dash") || f.ext == "mpd"))) {
+                } else if is_dash_ext
+                    || (metadata.formats.as_ref().is_some_and(|fmts| {
+                        fmts.iter()
+                            .any(|f| f.format_id.contains("dash") || f.ext == "mpd")
+                    }))
+                {
                     MediaSourceType::Dash
                 } else if is_direct_ext {
                     MediaSourceType::DirectFile
@@ -99,7 +112,7 @@ impl UniversalResolver {
                 };
 
                 // Validate that generic extraction actually found media candidates
-                let has_candidates = metadata.formats.as_ref().map_or(false, |f| !f.is_empty())
+                let has_candidates = metadata.formats.as_ref().is_some_and(|f| !f.is_empty())
                     || metadata.has_video
                     || metadata.has_audio;
 
@@ -131,9 +144,12 @@ impl UniversalResolver {
                 let capabilities = MediaCapabilities {
                     video: metadata.has_video,
                     audio: metadata.has_audio,
-                    subtitles: metadata.subtitles.as_ref().map_or(false, |s| !s.is_empty())
-                        || metadata.automatic_captions.as_ref().map_or(false, |s| !s.is_empty()),
-                    chapters: metadata.chapters.as_ref().map_or(false, |c| !c.is_empty()),
+                    subtitles: metadata.subtitles.as_ref().is_some_and(|s| !s.is_empty())
+                        || metadata
+                            .automatic_captions
+                            .as_ref()
+                            .is_some_and(|s| !s.is_empty()),
+                    chapters: metadata.chapters.as_ref().is_some_and(|c| !c.is_empty()),
                     thumbnails: metadata.thumbnail.is_some(),
                     metadata_embedding: true,
                     container_support: vec![
@@ -148,7 +164,8 @@ impl UniversalResolver {
                 };
 
                 // Select download strategy & evaluate transcoding cost
-                let (strategy, cost, explanation) = Self::evaluate_strategy(&source_type, &metadata, &PresetType::Mp4Compatible);
+                let (strategy, cost, explanation) =
+                    Self::evaluate_strategy(&source_type, &metadata, &PresetType::Mp4Compatible);
 
                 metadata.source_type = Some(source_type);
                 metadata.strategy = Some(strategy);
@@ -180,15 +197,13 @@ impl UniversalResolver {
                 if is_direct_ext {
                     let raw_filename = validated_url
                         .split('/')
-                        .last()
+                        .next_back()
                         .unwrap_or("media_file")
                         .split('?')
                         .next()
                         .unwrap_or("media_file");
 
-                    let clean_filename = raw_filename
-                        .replace("%20", " ")
-                        .replace('+', " ");
+                    let clean_filename = raw_filename.replace("%20", " ").replace('+', " ");
 
                     let display_title = if let Some(dot_idx) = clean_filename.rfind('.') {
                         clean_filename[..dot_idx].trim().to_string()
@@ -196,9 +211,10 @@ impl UniversalResolver {
                         clean_filename.trim().to_string()
                     };
 
-                    let domain_uploader = url::Url::parse(&validated_url)
-                        .ok()
-                        .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_string()));
+                    let domain_uploader = url::Url::parse(&validated_url).ok().and_then(|u| {
+                        u.host_str()
+                            .map(|h| h.trim_start_matches("www.").to_string())
+                    });
 
                     let is_audio = lower_url.ends_with(".mp3")
                         || lower_url.ends_with(".m4a")
@@ -207,7 +223,11 @@ impl UniversalResolver {
                         || lower_url.ends_with(".aac")
                         || lower_url.ends_with(".ogg");
 
-                    let kind = if is_audio { MediaKind::Audio } else { MediaKind::Video };
+                    let kind = if is_audio {
+                        MediaKind::Audio
+                    } else {
+                        MediaKind::Video
+                    };
 
                     let metadata = MediaMetadata {
                         id: format!("direct_{:x}", md5_hash(&validated_url)),
@@ -248,7 +268,9 @@ impl UniversalResolver {
                         source_type: Some(MediaSourceType::DirectFile),
                         strategy: Some(DownloadStrategy::DirectCopy),
                         transcoding_cost: Some(TranscodingCost::StreamCopy),
-                        transcoding_explanation: Some("Fast · Direct stream copy (no transcoding)".to_string()),
+                        transcoding_explanation: Some(
+                            "Fast · Direct stream copy (no transcoding)".to_string(),
+                        ),
                         capabilities: Some(MediaCapabilities {
                             video: !is_audio,
                             audio: true,
@@ -300,7 +322,8 @@ impl UniversalResolver {
                     candidates: Vec::new(),
                     strategy: DownloadStrategy::DirectCopy,
                     transcoding_cost: TranscodingCost::NoProcessing,
-                    transcoding_explanation: "Source analysis could not retrieve media streams".to_string(),
+                    transcoding_explanation: "Source analysis could not retrieve media streams"
+                        .to_string(),
                     metadata: None,
                     error_detail: Some(ResolverErrorDetail {
                         category,
@@ -337,7 +360,8 @@ impl UniversalResolver {
                 "Fast · DASH manifest remux".to_string(),
             ),
             MediaSourceType::YtDlpExtractor | MediaSourceType::YtDlpGeneric => {
-                let is_audio_preset = matches!(requested_preset, PresetType::Mp3 | PresetType::Flac);
+                let is_audio_preset =
+                    matches!(requested_preset, PresetType::Mp3 | PresetType::Flac);
                 if is_audio_preset {
                     (
                         DownloadStrategy::FfmpegTranscode,
@@ -419,36 +443,84 @@ impl UniversalResolver {
 
         let resp = client
             .get(url)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
             .header("Accept-Language", "en-US,en;q=0.9")
             .header("Referer", "https://www.tiktok.com/")
             .send()
             .await
             .map_err(|e| format!("Failed to reach TikTok: {}", e))?;
 
-        let html = resp.text().await.map_err(|e| format!("Failed to read TikTok response: {}", e))?;
+        let html = resp
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read TikTok response: {}", e))?;
 
         let marker = "__UNIVERSAL_DATA_FOR_REHYDRATION__\" type=\"application/json\">";
-        let start_pos = html.find(marker).ok_or_else(|| "Could not locate TikTok rehydration metadata in page".to_string())? + marker.len();
-        let end_pos = html[start_pos..].find("</script>").ok_or_else(|| "Malformed TikTok script payload".to_string())? + start_pos;
+        let start_pos = html
+            .find(marker)
+            .ok_or_else(|| "Could not locate TikTok rehydration metadata in page".to_string())?
+            + marker.len();
+        let end_pos = html[start_pos..]
+            .find("</script>")
+            .ok_or_else(|| "Malformed TikTok script payload".to_string())?
+            + start_pos;
         let json_str = &html[start_pos..end_pos];
 
-        let val: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Failed to parse TikTok JSON: {}", e))?;
-        let scope = val.get("__DEFAULT_SCOPE__").ok_or_else(|| "Missing default scope in TikTok data".to_string())?;
-        let detail = scope.get("webapp.video-detail").ok_or_else(|| "Video detail not found in TikTok data".to_string())?;
-        let item = detail.get("itemInfo").and_then(|i| i.get("itemStruct")).ok_or_else(|| "Video struct not found (video may be private or removed)".to_string())?;
+        let val: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| format!("Failed to parse TikTok JSON: {}", e))?;
+        let scope = val
+            .get("__DEFAULT_SCOPE__")
+            .ok_or_else(|| "Missing default scope in TikTok data".to_string())?;
+        let detail = scope
+            .get("webapp.video-detail")
+            .ok_or_else(|| "Video detail not found in TikTok data".to_string())?;
+        let item = detail
+            .get("itemInfo")
+            .and_then(|i| i.get("itemStruct"))
+            .ok_or_else(|| {
+                "Video struct not found (video may be private or removed)".to_string()
+            })?;
 
-        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("tiktok_video").to_string();
-        let raw_desc = item.get("desc").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let id = item
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tiktok_video")
+            .to_string();
+        let raw_desc = item
+            .get("desc")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         let author = item.get("author");
-        let nickname = author.and_then(|a| a.get("nickname")).and_then(|v| v.as_str()).unwrap_or("");
-        let unique_id = author.and_then(|a| a.get("uniqueId")).and_then(|v| v.as_str()).unwrap_or("");
-        let avatar = author.and_then(|a| a.get("avatarThumb").or_else(|| a.get("avatarLarger"))).and_then(|v| v.as_str()).map(|s| s.to_string());
+        let nickname = author
+            .and_then(|a| a.get("nickname"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let unique_id = author
+            .and_then(|a| a.get("uniqueId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let avatar = author
+            .and_then(|a| a.get("avatarThumb").or_else(|| a.get("avatarLarger")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let video = item.get("video");
-        let cover = video.and_then(|v| v.get("cover")).and_then(|v| v.as_str()).map(|s| s.to_string());
-        let duration = video.and_then(|v| v.get("duration")).and_then(|v| v.as_f64());
-        let play_addr = video.and_then(|v| v.get("playAddr")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let cover = video
+            .and_then(|v| v.get("cover"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let duration = video
+            .and_then(|v| v.get("duration"))
+            .and_then(|v| v.as_f64());
+        let play_addr = video
+            .and_then(|v| v.get("playAddr"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let uploader_display = if !nickname.is_empty() && !unique_id.is_empty() {
             Some(format!("{} (@{})", nickname, unique_id))
@@ -497,8 +569,16 @@ impl UniversalResolver {
             title,
             uploader: uploader_display,
             uploader_avatar: avatar,
-            channel_id: if !unique_id.is_empty() { Some(unique_id.to_string()) } else { None },
-            uploader_url: if !unique_id.is_empty() { Some(format!("https://www.tiktok.com/@{}", unique_id)) } else { None },
+            channel_id: if !unique_id.is_empty() {
+                Some(unique_id.to_string())
+            } else {
+                None
+            },
+            uploader_url: if !unique_id.is_empty() {
+                Some(format!("https://www.tiktok.com/@{}", unique_id))
+            } else {
+                None
+            },
             duration,
             thumbnail: cover,
             webpage_url: url.to_string(),
@@ -549,7 +629,11 @@ impl UniversalResolver {
     fn categorize_error(err: &str) -> (ResolverErrorCategory, String) {
         let lower = err.to_lowercase();
 
-        if lower.contains("drm") || lower.contains("protected") || lower.contains("encrypted") || lower.contains("widevine") {
+        if lower.contains("drm")
+            || lower.contains("protected")
+            || lower.contains("encrypted")
+            || lower.contains("widevine")
+        {
             (
                 ResolverErrorCategory::DrmProtected,
                 "This media is protected by Digital Rights Management (DRM) encryption and cannot be downloaded.".to_string(),
@@ -609,8 +693,8 @@ mod tests {
 
     #[test]
     fn test_scenario_b_direct_mp4() {
-        let resolver = UniversalResolver::new(Arc::new(ToolResolver::new()));
-        let url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+        let url =
+            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
         let validation = crate::url_validator::validate_url(url);
         assert!(validation.is_ok());
 
@@ -829,25 +913,32 @@ mod tests {
     #[test]
     fn test_scenario_error_categorization() {
         // DRM protected
-        let (cat, msg) = UniversalResolver::categorize_error("ERROR: This video is DRM protected with Widevine");
+        let (cat, msg) =
+            UniversalResolver::categorize_error("ERROR: This video is DRM protected with Widevine");
         assert_eq!(cat, ResolverErrorCategory::DrmProtected);
         assert!(msg.contains("Digital Rights Management"));
 
         // Private / login required
-        let (cat, msg) = UniversalResolver::categorize_error("ERROR: Sign in to confirm your age / Private video");
+        let (cat, msg) = UniversalResolver::categorize_error(
+            "ERROR: Sign in to confirm your age / Private video",
+        );
         assert_eq!(cat, ResolverErrorCategory::RequiresAuthentication);
         assert!(msg.contains("private or requires account sign-in"));
 
         // Network unreachable
-        let (cat, _) = UniversalResolver::categorize_error("ERROR: Name or service not known getaddrinfo failed");
+        let (cat, _) = UniversalResolver::categorize_error(
+            "ERROR: Name or service not known getaddrinfo failed",
+        );
         assert_eq!(cat, ResolverErrorCategory::NetworkUnreachable);
 
         // Timeout
-        let (cat, _) = UniversalResolver::categorize_error("ERROR: Connection timed out after 15000ms");
+        let (cat, _) =
+            UniversalResolver::categorize_error("ERROR: Connection timed out after 15000ms");
         assert_eq!(cat, ResolverErrorCategory::Timeout);
 
         // No media found
-        let (cat, _) = UniversalResolver::categorize_error("ERROR: Unsupported URL: No video formats found");
+        let (cat, _) =
+            UniversalResolver::categorize_error("ERROR: Unsupported URL: No video formats found");
         assert_eq!(cat, ResolverErrorCategory::NoMediaFound);
     }
 

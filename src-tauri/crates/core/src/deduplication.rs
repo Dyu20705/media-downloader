@@ -5,7 +5,10 @@ pub struct DeduplicationEngine;
 
 impl DeduplicationEngine {
     /// Compares two media fingerprints for canonical duplication without full-file hashing
-    pub fn check_duplicate(a: &MediaFingerprint, b: &MediaFingerprint) -> Option<DuplicateCandidate> {
+    pub fn check_duplicate(
+        a: &MediaFingerprint,
+        b: &MediaFingerprint,
+    ) -> Option<DuplicateCandidate> {
         // Exact canonical fingerprint match
         if a.canonical_id == b.canonical_id {
             return Some(DuplicateCandidate {

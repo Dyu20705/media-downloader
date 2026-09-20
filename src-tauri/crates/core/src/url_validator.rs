@@ -27,7 +27,10 @@ pub fn validate_media_url(raw_url: &str) -> Result<String, UrlValidationError> {
     }
 
     // Reject null bytes, control characters, newlines
-    if trimmed.chars().any(|c| c.is_control() || c == '\0' || c == '\n' || c == '\r') {
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() || c == '\0' || c == '\n' || c == '\r')
+    {
         return Err(UrlValidationError::InvalidCharacters);
     }
 
@@ -47,7 +50,9 @@ pub fn validate_media_url(raw_url: &str) -> Result<String, UrlValidationError> {
 
     let domain_part = after_scheme.split('/').next().unwrap_or("");
     if domain_part.is_empty() || domain_part.contains(' ') {
-        return Err(UrlValidationError::MalformedUrl("Missing or invalid domain name".to_string()));
+        return Err(UrlValidationError::MalformedUrl(
+            "Missing or invalid domain name".to_string(),
+        ));
     }
 
     let host = domain_part.split(':').next().unwrap_or("").to_lowercase();
@@ -86,7 +91,10 @@ mod tests {
     #[test]
     fn test_rejects_empty_or_whitespace() {
         assert_eq!(validate_media_url(""), Err(UrlValidationError::EmptyUrl));
-        assert_eq!(validate_media_url("   \t  "), Err(UrlValidationError::EmptyUrl));
+        assert_eq!(
+            validate_media_url("   \t  "),
+            Err(UrlValidationError::EmptyUrl)
+        );
     }
 
     #[test]

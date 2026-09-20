@@ -1,7 +1,7 @@
+use chrono::Local;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use chrono::Local;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::diagnostics::DiagnosticsBuffer;
@@ -13,9 +13,7 @@ use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
 use crate::settings::SettingsManager;
 use crate::state_machine::DownloadStateMachine;
 use crate::tools::ToolResolver;
-use crate::types::{
-    DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest,
-};
+use crate::types::{DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest};
 use crate::url_validator::validate_media_url;
 
 pub struct ActiveJobHandle {
@@ -63,7 +61,10 @@ impl DownloadManager {
                     | DownloadStatus::Verifying
                     | DownloadStatus::Cancelling
             ) {
-                return Err("A download is already in progress. Only 1 concurrent download is permitted.".to_string());
+                return Err(
+                    "A download is already in progress. Only 1 concurrent download is permitted."
+                        .to_string(),
+                );
             }
         }
 
@@ -121,7 +122,10 @@ impl DownloadManager {
         self.diagnostics.log(
             "INFO",
             "DOWNLOAD_MANAGER",
-            &format!("Starting download for '{}' using preset {:?}", request.metadata.title, request.preset),
+            &format!(
+                "Starting download for '{}' using preset {:?}",
+                request.metadata.title, request.preset
+            ),
         );
 
         let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
@@ -134,16 +138,12 @@ impl DownloadManager {
         }
 
         // Spawn process runner
-        let mut proc_handle = ProcessHandle::spawn_with_streaming(
-            &ytdlp_tool.path,
-            &final_args,
-            line_tx,
-        )
-        .await
-        .map_err(|e| {
-            self.diagnostics.log("ERROR", "PROCESS", &e);
-            e
-        })?;
+        let mut proc_handle =
+            ProcessHandle::spawn_with_streaming(&ytdlp_tool.path, &final_args, line_tx)
+                .await
+                .inspect_err(|e| {
+                    self.diagnostics.log("ERROR", "PROCESS", e);
+                })?;
 
         // Save active handle
         *self.active_handle.lock().await = Some(ActiveJobHandle {

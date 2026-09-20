@@ -1,6 +1,6 @@
+use crate::types::AppSettings;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use crate::types::AppSettings;
 
 const SETTINGS_TEMP_SUFFIX: &str = ".tmp";
 const SETTINGS_BACKUP_SUFFIX: &str = ".bak";
@@ -9,6 +9,12 @@ const SETTINGS_BACKUP_SUFFIX: &str = ".bak";
 pub struct SettingsManager {
     file_path: PathBuf,
     cached: Arc<RwLock<AppSettings>>,
+}
+
+impl Default for SettingsManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SettingsManager {
@@ -61,7 +67,9 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
         // 1. Write to temporary file first
-        let tmp_file_path = self.file_path.with_extension(format!("json{}", SETTINGS_TEMP_SUFFIX));
+        let tmp_file_path = self
+            .file_path
+            .with_extension(format!("json{}", SETTINGS_TEMP_SUFFIX));
         std::fs::write(&tmp_file_path, &json_str)
             .map_err(|e| format!("Failed to write temporary settings: {}", e))?;
 
@@ -74,8 +82,12 @@ impl SettingsManager {
         // 3. Atomically rename temporary file over target
         if let Err(rename_err) = std::fs::rename(&tmp_file_path, &self.file_path) {
             // Fallback for filesystems that do not support overwrite rename
-            std::fs::copy(&tmp_file_path, &self.file_path)
-                .map_err(|e| format!("Failed to atomically commit settings file: {} (rename error: {})", e, rename_err))?;
+            std::fs::copy(&tmp_file_path, &self.file_path).map_err(|e| {
+                format!(
+                    "Failed to atomically commit settings file: {} (rename error: {})",
+                    e, rename_err
+                )
+            })?;
             let _ = std::fs::remove_file(&tmp_file_path);
         }
 

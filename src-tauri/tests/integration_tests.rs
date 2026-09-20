@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use one_click_media_downloader_lib::core::analyzer::{analyze_media_metadata, parse_ytdlp_json};
 use one_click_media_downloader_lib::core::path_validator::{
     sanitize_file_name, validate_and_ensure_directory,
@@ -10,6 +9,7 @@ use one_click_media_downloader_lib::core::types::{
     AppSettings, DownloadStatus, MediaKind, PresetType,
 };
 use one_click_media_downloader_lib::core::url_validator::validate_media_url;
+use std::sync::Arc;
 
 fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
     arguments
@@ -171,7 +171,10 @@ async fn test_real_ytdlp_metadata_analysis_integration() {
             assert!(!meta.available_resolutions.is_empty());
         }
         Err(e) => {
-            eprintln!("Live yt-dlp analysis returned error (acceptable in offline environments): {}", e);
+            eprintln!(
+                "Live yt-dlp analysis returned error (acceptable in offline environments): {}",
+                e
+            );
         }
     }
 }

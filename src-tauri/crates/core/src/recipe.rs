@@ -1,6 +1,6 @@
 use crate::types::{
-    DownloadJob, DownloadRecipe, DownloadStrategy, MediaMetadata, MediaSourceType, PresetType,
-    UserIntent, VerificationChecklist,
+    DownloadJob, DownloadRecipe, DownloadStrategy, MediaSourceType, PresetType,
+    VerificationChecklist,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -44,7 +44,10 @@ impl RecipeEngine {
             }
             DownloadStrategy::YtDlpMerge => {
                 transformations.push("Multiplex video and audio bitstreams".to_string());
-                transformations.push(format!("Target container encapsulation: {}", output_container));
+                transformations.push(format!(
+                    "Target container encapsulation: {}",
+                    output_container
+                ));
             }
             DownloadStrategy::FfmpegRemux => {
                 transformations.push("Container remuxing without bitstream alteration".to_string());
@@ -78,7 +81,9 @@ impl RecipeEngine {
         let recipe_id = format!("recipe_{:012x}", hasher.finish());
 
         let timestamp = {
-            let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+            let dur = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default();
             format!("{}.{:03}Z", dur.as_secs(), dur.subsec_millis())
         };
 

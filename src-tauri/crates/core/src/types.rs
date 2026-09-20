@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MediaSourceType {
+    #[default]
     YtDlpExtractor,
     YtDlpGeneric,
     DirectFile,
@@ -13,17 +14,12 @@ pub enum MediaSourceType {
     Inaccessible,
 }
 
-impl Default for MediaSourceType {
-    fn default() -> Self {
-        MediaSourceType::YtDlpExtractor
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DownloadStrategy {
     DirectCopy,
     YtDlpDownload,
+    #[default]
     YtDlpMerge,
     FfmpegRemux,
     FfmpegTranscode,
@@ -31,15 +27,10 @@ pub enum DownloadStrategy {
     DashDownload,
 }
 
-impl Default for DownloadStrategy {
-    fn default() -> Self {
-        DownloadStrategy::YtDlpMerge
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TranscodingCost {
+    #[default]
     NoProcessing,
     StreamCopy,
     Remux,
@@ -47,15 +38,10 @@ pub enum TranscodingCost {
     Transcode,
 }
 
-impl Default for TranscodingCost {
-    fn default() -> Self {
-        TranscodingCost::NoProcessing
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ResolverErrorCategory {
+    #[default]
     None,
     InvalidUrl,
     UnsupportedProtocol,
@@ -65,12 +51,6 @@ pub enum ResolverErrorCategory {
     NetworkUnreachable,
     Timeout,
     ExtractorFailed,
-}
-
-impl Default for ResolverErrorCategory {
-    fn default() -> Self {
-        ResolverErrorCategory::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -95,20 +75,15 @@ pub struct MediaCapabilities {
     pub transcoding_required: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum PresetType {
+    #[default]
     Mp4Compatible,
     BestVideo,
     BestAudio,
     Mp3,
     Flac,
-}
-
-impl Default for PresetType {
-    fn default() -> Self {
-        PresetType::Mp4Compatible
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,32 +94,22 @@ pub enum MediaKind {
     Livestream,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SponsorBlockMode {
+    #[default]
     Off,
     MarkChapters,
     RemoveSegments,
 }
 
-impl Default for SponsorBlockMode {
-    fn default() -> Self {
-        SponsorBlockMode::Off
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SubtitleMode {
+    #[default]
     None,
     Embed,
     DownloadSeparate,
-}
-
-impl Default for SubtitleMode {
-    fn default() -> Self {
-        SubtitleMode::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -186,19 +151,14 @@ pub struct MediaFormatSpec {
     pub audio_channels: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum UserIntent {
     MaxQuality,
     SmallestSize,
     BestCompatibility,
+    #[default]
     Balanced,
-}
-
-impl Default for UserIntent {
-    fn default() -> Self {
-        UserIntent::Balanced
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -361,9 +321,10 @@ pub struct ResolvedMediaSource {
     pub is_resolved: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DownloadStatus {
+    #[default]
     Idle,
     Analyzing,
     Ready,
@@ -374,12 +335,6 @@ pub enum DownloadStatus {
     Failed,
     Cancelling,
     Cancelled,
-}
-
-impl Default for DownloadStatus {
-    fn default() -> Self {
-        DownloadStatus::Idle
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -562,7 +517,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         let default_dir = dirs::download_dir()
-            .or_else(|| dirs::video_dir())
+            .or_else(dirs::video_dir)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| {
                 if cfg!(windows) {
@@ -595,21 +550,16 @@ impl Default for AppSettings {
 }
 
 /// Tool health status enum matching the specification
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ToolStatus {
     Ready,
+    #[default]
     Missing,
     Installing,
     Invalid,
     Outdated,
     Error,
-}
-
-impl Default for ToolStatus {
-    fn default() -> Self {
-        ToolStatus::Missing
-    }
 }
 
 /// Detailed status information for a tool

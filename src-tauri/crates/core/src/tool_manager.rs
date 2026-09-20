@@ -1,9 +1,9 @@
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 use crate::diagnostics::DiagnosticsBuffer;
@@ -103,7 +103,9 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
 ];
 
 pub fn get_pinned_tool_spec(name: &str) -> Option<&'static PinnedToolSpec> {
-    PINNED_TOOLS.iter().find(|t| t.name.eq_ignore_ascii_case(name))
+    PINNED_TOOLS
+        .iter()
+        .find(|t| t.name.eq_ignore_ascii_case(name))
 }
 
 #[derive(Debug, Clone)]
@@ -187,7 +189,10 @@ impl ToolManager {
         fs::create_dir_all(tools_dir).map_err(|e| format!("Failed to create tools dir: {}", e))?;
 
         let manifest_path = self.get_manifest_path();
-        let tmp_path = tools_dir.join(format!("manifest.{}.tmp", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        let tmp_path = tools_dir.join(format!(
+            "manifest.{}.tmp",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
 
         let json_data = serde_json::to_string_pretty(manifest)
             .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
@@ -203,12 +208,15 @@ impl ToolManager {
 
     /// Compute SHA-256 of any file
     pub fn compute_sha256(path: &Path) -> Result<String, String> {
-        let mut file = File::open(path).map_err(|e| format!("Cannot open file for hashing: {}", e))?;
+        let mut file =
+            File::open(path).map_err(|e| format!("Cannot open file for hashing: {}", e))?;
         let mut hasher = Sha256::new();
         let mut buffer = [0u8; 65536];
 
         loop {
-            let count = file.read(&mut buffer).map_err(|e| format!("Read error while hashing: {}", e))?;
+            let count = file
+                .read(&mut buffer)
+                .map_err(|e| format!("Read error while hashing: {}", e))?;
             if count == 0 {
                 break;
             }
@@ -260,7 +268,10 @@ impl ToolManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Executable returned non-zero exit code: {}", stderr.trim()));
+            return Err(format!(
+                "Executable returned non-zero exit code: {}",
+                stderr.trim()
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -278,7 +289,11 @@ impl ToolManager {
     /// 3. Bounded repository search (depth <= 3)
     /// 4. System PATH
     /// 5. Application-local managed tool
-    pub async fn resolve_tool(&self, tool_name: &str, settings: Option<&AppSettings>) -> Option<ResolvedExecutable> {
+    pub async fn resolve_tool(
+        &self,
+        tool_name: &str,
+        settings: Option<&AppSettings>,
+    ) -> Option<ResolvedExecutable> {
         // Check lifetime resolution cache
         if let Ok(cache) = self.resolution_cache.read() {
             if let Some(tool) = cache.get(tool_name) {
@@ -321,7 +336,11 @@ impl ToolManager {
         }
 
         let exe_names: Vec<String> = if cfg!(windows) {
-            vec![format!("{}.exe", tool_name), format!("{}.EXE", tool_name), tool_name.to_string()]
+            vec![
+                format!("{}.exe", tool_name),
+                format!("{}.EXE", tool_name),
+                tool_name.to_string(),
+            ]
         } else {
             vec![tool_name.to_string()]
         };
@@ -418,12 +437,15 @@ impl ToolManager {
 
     fn cache_resolution(&self, tool_name: &str, res: &ResolvedExecutable) {
         if let Ok(mut cache) = self.resolution_cache.write() {
-            cache.insert(tool_name.to_string(), ResolvedExecutable {
-                name: res.name.clone(),
-                path: res.path.clone(),
-                version: res.version.clone(),
-                is_managed: res.is_managed,
-            });
+            cache.insert(
+                tool_name.to_string(),
+                ResolvedExecutable {
+                    name: res.name.clone(),
+                    path: res.path.clone(),
+                    version: res.version.clone(),
+                    is_managed: res.is_managed,
+                },
+            );
         }
     }
 
@@ -442,7 +464,10 @@ impl ToolManager {
                 let path = entry.path();
                 if path.is_file() {
                     if let Some(file_name) = path.file_name().and_then(|f| f.to_str()) {
-                        if exe_names.iter().any(|name| name.eq_ignore_ascii_case(file_name)) {
+                        if exe_names
+                            .iter()
+                            .any(|name| name.eq_ignore_ascii_case(file_name))
+                        {
                             out.push(path);
                         }
                     }
@@ -457,7 +482,11 @@ impl ToolManager {
     }
 
     /// Check status of a single tool according to specification
-    pub async fn check_tool_status(&self, tool_name: &str, settings: Option<&AppSettings>) -> ToolStatusInfo {
+    pub async fn check_tool_status(
+        &self,
+        tool_name: &str,
+        settings: Option<&AppSettings>,
+    ) -> ToolStatusInfo {
         let spec = match get_pinned_tool_spec(tool_name) {
             Some(s) => s,
             None => {
@@ -509,7 +538,10 @@ impl ToolManager {
                             .unwrap_or(false);
 
                         // If file is directly pinned binary and does not match expected nor manifest
-                        if !spec.is_archive && !actual_sha.eq_ignore_ascii_case(expected_sha256) && !is_manifest_match {
+                        if !spec.is_archive
+                            && !actual_sha.eq_ignore_ascii_case(expected_sha256)
+                            && !is_manifest_match
+                        {
                             return ToolStatusInfo {
                                 name: tool_name.to_string(),
                                 status: ToolStatus::Invalid,
@@ -519,7 +551,10 @@ impl ToolManager {
                                 managed: true,
                                 source_url: Some(source_url.to_string()),
                                 sha256: Some(actual_sha),
-                                error_message: Some("Binary checksum mismatch. Reinstallation recommended.".to_string()),
+                                error_message: Some(
+                                    "Binary checksum mismatch. Reinstallation recommended."
+                                        .to_string(),
+                                ),
                                 license: spec.license.to_string(),
                                 license_url: spec.license_url.to_string(),
                                 is_required: spec.is_required,
@@ -629,7 +664,10 @@ impl ToolManager {
                         managed: true,
                         source_url: Some(source_url.to_string()),
                         sha256: Some(expected_sha256.to_string()),
-                        error_message: Some("Tool executable is damaged or non-executable. Repair required.".to_string()),
+                        error_message: Some(
+                            "Tool executable is damaged or non-executable. Repair required."
+                                .to_string(),
+                        ),
                         license: spec.license.to_string(),
                         license_url: spec.license_url.to_string(),
                         is_required: spec.is_required,
@@ -645,7 +683,10 @@ impl ToolManager {
                         source_url: Some(source_url.to_string()),
                         sha256: Some(expected_sha256.to_string()),
                         error_message: if spec.is_required {
-                            Some(format!("Required component '{}' is not installed.", tool_name))
+                            Some(format!(
+                                "Required component '{}' is not installed.",
+                                tool_name
+                            ))
                         } else {
                             None
                         },
@@ -659,7 +700,10 @@ impl ToolManager {
     }
 
     /// Check status of all managed tools
-    pub async fn get_all_tool_statuses(&self, settings: Option<&AppSettings>) -> Vec<ToolStatusInfo> {
+    pub async fn get_all_tool_statuses(
+        &self,
+        settings: Option<&AppSettings>,
+    ) -> Vec<ToolStatusInfo> {
         let mut results = Vec::new();
         for spec in PINNED_TOOLS {
             results.push(self.check_tool_status(spec.name, settings).await);
@@ -670,21 +714,25 @@ impl ToolManager {
     /// Backward-compatible health report
     pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
         let statuses = self.get_all_tool_statuses(None).await;
-        statuses.into_iter().map(|s| {
-            let available = s.status == ToolStatus::Ready;
-            let repair_msg = if !available {
-                s.error_message.or_else(|| Some(format!("Click Repair to install {}", s.name)))
-            } else {
-                None
-            };
-            ToolHealth {
-                name: s.name,
-                available,
-                path: s.path,
-                version: s.version,
-                repair_message: repair_msg,
-            }
-        }).collect()
+        statuses
+            .into_iter()
+            .map(|s| {
+                let available = s.status == ToolStatus::Ready;
+                let repair_msg = if !available {
+                    s.error_message
+                        .or_else(|| Some(format!("Click Repair to install {}", s.name)))
+                } else {
+                    None
+                };
+                ToolHealth {
+                    name: s.name,
+                    available,
+                    path: s.path,
+                    version: s.version,
+                    repair_message: repair_msg,
+                }
+            })
+            .collect()
     }
 
     /// Install tool atomically:
@@ -699,7 +747,11 @@ impl ToolManager {
         let spec = get_pinned_tool_spec(tool_name)
             .ok_or_else(|| format!("Unknown tool specification: {}", tool_name))?;
 
-        self.diagnostics.log("info", "tool_manager", &format!("Starting atomic installation for {}", tool_name));
+        self.diagnostics.log(
+            "info",
+            "tool_manager",
+            &format!("Starting atomic installation for {}", tool_name),
+        );
 
         let source_url = if cfg!(windows) {
             spec.windows_url
@@ -721,10 +773,18 @@ impl ToolManager {
         fs::create_dir_all(&staging_dir)
             .map_err(|e| format!("Failed to create staging dir: {}", e))?;
 
-        let tmp_file_name = format!("{}-{}.tmp", tool_name, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        let tmp_file_name = format!(
+            "{}-{}.tmp",
+            tool_name,
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
         let tmp_file_path = staging_dir.join(&tmp_file_name);
 
-        self.diagnostics.log("info", "tool_manager", &format!("Downloading {} from {}", tool_name, source_url));
+        self.diagnostics.log(
+            "info",
+            "tool_manager",
+            &format!("Downloading {} from {}", tool_name, source_url),
+        );
 
         // Perform download
         let client = reqwest::Client::builder()
@@ -734,23 +794,36 @@ impl ToolManager {
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-        let response = client.get(source_url)
+        let response = client
+            .get(source_url)
             .send()
             .await
             .map_err(|e| format!("Download request failed for {}: {}", tool_name, e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Download failed with HTTP status: {}", response.status()));
+            return Err(format!(
+                "Download failed with HTTP status: {}",
+                response.status()
+            ));
         }
 
-        let bytes = response.bytes().await
+        let bytes = response
+            .bytes()
+            .await
             .map_err(|e| format!("Failed to read response stream: {}", e))?;
 
         fs::write(&tmp_file_path, &bytes)
             .map_err(|e| format!("Failed to write staging file: {}", e))?;
 
         // Atomic Installation from verified file
-        let install_res = self.atomic_install_from_staging(tool_name, &tmp_file_path, expected_sha256, spec.is_archive).await;
+        let install_res = self
+            .atomic_install_from_staging(
+                tool_name,
+                &tmp_file_path,
+                expected_sha256,
+                spec.is_archive,
+            )
+            .await;
 
         // Cleanup staging file regardless of outcome
         let _ = fs::remove_file(&tmp_file_path);
@@ -758,11 +831,22 @@ impl ToolManager {
         match install_res {
             Ok(status_info) => {
                 self.clear_cache();
-                self.diagnostics.log("info", "tool_manager", &format!("Successfully installed {} v{}", tool_name, spec.pinned_version));
+                self.diagnostics.log(
+                    "info",
+                    "tool_manager",
+                    &format!(
+                        "Successfully installed {} v{}",
+                        tool_name, spec.pinned_version
+                    ),
+                );
                 Ok(status_info)
             }
             Err(e) => {
-                self.diagnostics.log("error", "tool_manager", &format!("Installation failed for {}: {}", tool_name, e));
+                self.diagnostics.log(
+                    "error",
+                    "tool_manager",
+                    &format!("Installation failed for {}: {}", tool_name, e),
+                );
                 Err(e)
             }
         }
@@ -780,13 +864,19 @@ impl ToolManager {
         fs::create_dir_all(&staging_dir)
             .map_err(|e| format!("Failed to create staging dir: {}", e))?;
 
-        let tmp_file_name = format!("{}-{}.tmp", tool_name, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        let tmp_file_name = format!(
+            "{}-{}.tmp",
+            tool_name,
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
         let tmp_file_path = staging_dir.join(&tmp_file_name);
 
         fs::write(&tmp_file_path, bytes)
             .map_err(|e| format!("Failed to write staging file: {}", e))?;
 
-        let res = self.atomic_install_from_staging(tool_name, &tmp_file_path, expected_sha256, is_archive).await;
+        let res = self
+            .atomic_install_from_staging(tool_name, &tmp_file_path, expected_sha256, is_archive)
+            .await;
         let _ = fs::remove_file(&tmp_file_path);
         if res.is_ok() {
             self.clear_cache();
@@ -806,7 +896,11 @@ impl ToolManager {
             .ok_or_else(|| format!("Unknown tool specification: {}", tool_name))?;
 
         // 1. Verify Checksum
-        self.diagnostics.log("info", "tool_manager", &format!("Verifying SHA-256 checksum for {}", tool_name));
+        self.diagnostics.log(
+            "info",
+            "tool_manager",
+            &format!("Verifying SHA-256 checksum for {}", tool_name),
+        );
         let matches = Self::verify_sha256(staged_file, expected_sha256)?;
         if !matches {
             let actual = Self::compute_sha256(staged_file)?;
@@ -818,7 +912,11 @@ impl ToolManager {
 
         // 2. Prepare Version Target Directory
         let target_version_dir = self.get_version_dir(tool_name, spec.pinned_version);
-        let staging_extract_dir = self.get_staging_dir().join(format!("{}-extracted-{}", tool_name, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        let staging_extract_dir = self.get_staging_dir().join(format!(
+            "{}-extracted-{}",
+            tool_name,
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
 
         fs::create_dir_all(&staging_extract_dir)
             .map_err(|e| format!("Failed to create staging extraction dir: {}", e))?;
@@ -841,7 +939,8 @@ impl ToolManager {
                         if let Ok(mut zip_file) = archive.by_index(i) {
                             let enclosed = zip_file.enclosed_name().map(|p| p.to_owned());
                             if let Some(rel_path) = enclosed {
-                                let file_name = rel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                                let file_name =
+                                    rel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                                 if file_name.eq_ignore_ascii_case(&final_bin_name) {
                                     if let Ok(mut out_file) = File::create(&staged_bin_path) {
                                         if std::io::copy(&mut zip_file, &mut out_file).is_ok() {
@@ -870,7 +969,12 @@ impl ToolManager {
                 if let Ok(out) = tar_output {
                     if out.status.success() {
                         let mut found_paths = Vec::new();
-                        Self::find_files_bounded(&staging_extract_dir, &[final_bin_name.clone()], 5, &mut found_paths);
+                        Self::find_files_bounded(
+                            &staging_extract_dir,
+                            std::slice::from_ref(&final_bin_name),
+                            5,
+                            &mut found_paths,
+                        );
                         if let Some(first_path) = found_paths.into_iter().next() {
                             if first_path != staged_bin_path {
                                 let _ = fs::copy(&first_path, &staged_bin_path);
@@ -883,7 +987,10 @@ impl ToolManager {
 
             if !extracted || !staged_bin_path.exists() {
                 let _ = fs::remove_dir_all(&staging_extract_dir);
-                return Err(format!("Binary '{}' could not be extracted from archive", final_bin_name));
+                return Err(format!(
+                    "Binary '{}' could not be extracted from archive",
+                    final_bin_name
+                ));
             }
         } else {
             // Direct binary
@@ -903,12 +1010,19 @@ impl ToolManager {
         }
 
         // 3. Executable Validation Check
-        self.diagnostics.log("info", "tool_manager", &format!("Validating executable binary for {}", tool_name));
+        self.diagnostics.log(
+            "info",
+            "tool_manager",
+            &format!("Validating executable binary for {}", tool_name),
+        );
         let version_str = match Self::validate_executable(tool_name, &staged_bin_path).await {
             Ok(v) => v,
             Err(e) => {
                 let _ = fs::remove_dir_all(&staging_extract_dir);
-                return Err(format!("Executable validation test failed for {}: {}", tool_name, e));
+                return Err(format!(
+                    "Executable validation test failed for {}: {}",
+                    tool_name, e
+                ));
             }
         };
 
@@ -923,9 +1037,15 @@ impl ToolManager {
 
         fs::rename(&staged_bin_path, &final_destination)
             .or_else(|_| {
-                fs::copy(&staged_bin_path, &final_destination).and_then(|_| fs::remove_file(&staged_bin_path))
+                fs::copy(&staged_bin_path, &final_destination)
+                    .and_then(|_| fs::remove_file(&staged_bin_path))
             })
-            .map_err(|e| format!("Failed to activate binary into {:?}: {}", final_destination, e))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to activate binary into {:?}: {}",
+                    final_destination, e
+                )
+            })?;
 
         // Ensure final destination has executable permissions on Unix
         #[cfg(unix)]
@@ -942,8 +1062,9 @@ impl ToolManager {
 
         // 5. Atomically update manifest.json
         let mut manifest = self.load_manifest();
-        let bin_sha = Self::compute_sha256(&final_destination).unwrap_or_else(|_| expected_sha256.to_string());
-        
+        let bin_sha = Self::compute_sha256(&final_destination)
+            .unwrap_or_else(|_| expected_sha256.to_string());
+
         manifest.tools.insert(
             tool_name.to_string(),
             ToolManifestEntry {
@@ -965,7 +1086,14 @@ impl ToolManager {
             pinned_version: spec.pinned_version.to_string(),
             path: Some(final_destination.to_string_lossy().to_string()),
             managed: true,
-            source_url: Some(if cfg!(windows) { spec.windows_url } else { spec.linux_url }.to_string()),
+            source_url: Some(
+                if cfg!(windows) {
+                    spec.windows_url
+                } else {
+                    spec.linux_url
+                }
+                .to_string(),
+            ),
             sha256: Some(bin_sha),
             error_message: None,
             license: spec.license.to_string(),
@@ -979,7 +1107,11 @@ impl ToolManager {
         let spec = get_pinned_tool_spec(tool_name)
             .ok_or_else(|| format!("Unknown tool: {}", tool_name))?;
 
-        self.diagnostics.log("warn", "tool_manager", &format!("Initiating repair/reinstall for {}", tool_name));
+        self.diagnostics.log(
+            "warn",
+            "tool_manager",
+            &format!("Initiating repair/reinstall for {}", tool_name),
+        );
 
         // Remove active managed files if corrupted
         let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
@@ -1001,9 +1133,9 @@ impl ToolManager {
         let mut results = Vec::new();
 
         for status in statuses {
-            if status.status == ToolStatus::Missing 
-                || status.status == ToolStatus::Invalid 
-                || status.status == ToolStatus::Outdated 
+            if status.status == ToolStatus::Missing
+                || status.status == ToolStatus::Invalid
+                || status.status == ToolStatus::Outdated
             {
                 match self.install_tool(&status.name).await {
                     Ok(installed) => results.push(installed),
@@ -1034,7 +1166,11 @@ impl ToolManager {
 
     /// Automatically bootstrap required tools on startup if missing or unmanaged
     pub async fn auto_bootstrap_required_tools(&self) -> Result<Vec<ToolStatusInfo>, String> {
-        self.diagnostics.log("info", "tool_manager", "Checking and auto-bootstrapping required engine tools");
+        self.diagnostics.log(
+            "info",
+            "tool_manager",
+            "Checking and auto-bootstrapping required engine tools",
+        );
         self.install_all_missing().await
     }
 }
