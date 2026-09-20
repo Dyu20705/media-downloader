@@ -17,9 +17,9 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
 - **Rich Format Presets**:
   - **MP4 (Compatible)**: Universal H.264/AAC playback.
   - **Best Video**: Highest available resolution (up to 4K/8K).
-  - **Best Audio**: Direct source audio extraction (Opus/AAC).
-  - **MP3**: 320 kbps high-quality audio.
-  - **FLAC**: Lossless audio container packaging.
+  - **Best Audio**: Preserves the best available source audio stream when possible (for example Opus/AAC) without unnecessary re-encoding.
+  - **MP3**: Universal MP3 output at up to 320 kbps. This is a lossy transcode and cannot improve the quality of the source stream.
+  - **FLAC**: FLAC output for workflows that require the format. Converting a lossy source to FLAC does not restore information already lost in the source.
 - **Deep Media Verification**: Real-time post-download inspection ensuring valid video/audio streams, duration, bitrate, and headers.
 - **Secure by Design**: Isolated subprocess execution without shell interpolation, path traversal prevention, and strict sanitization.
 
@@ -59,6 +59,7 @@ npm run tauri build
 
 - [Architecture Overview](docs/architecture.md)
 - [Universal Media Resolver](docs/universal-resolver.md)
+- [Quality Transparency & Download Plan](docs/quality-transparency.md)
 - [Tool Management & Supply Chain](docs/tool-management.md)
 - [Security & Hardening](docs/security.md)
 - [Performance & Benchmarks](docs/performance.md)
