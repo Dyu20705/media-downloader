@@ -13,6 +13,7 @@ interface FormatOption {
   id: PresetType;
   title: string;
   subtitle: string;
+  guidance?: string;
   badge?: string;
 }
 
@@ -30,17 +31,20 @@ const FORMAT_OPTIONS: FormatOption[] = [
   {
     id: 'best-audio',
     title: 'Best Audio',
-    subtitle: 'Preserve source audio',
+    subtitle: 'Preserve best available source',
+    guidance: 'Preserves the source audio stream when possible, avoiding an unnecessary lossy-to-lossy conversion.',
   },
   {
     id: 'mp3',
     title: 'MP3',
-    subtitle: 'Universal audio',
+    subtitle: 'Universal compatibility · lossy transcode',
+    guidance: 'Converts the source to MP3. A 320 kbps output cannot restore detail that is missing from the source stream.',
   },
   {
     id: 'flac',
     title: 'FLAC',
-    subtitle: 'Lossless container',
+    subtitle: 'FLAC output · source quality unchanged',
+    guidance: 'FLAC avoids additional codec loss after decoding, but converting a lossy source does not make the original audio lossless.',
   },
 ];
 
@@ -109,6 +113,12 @@ export const FormatSelector: React.FC<FormatSelectorProps> = ({
           );
         })}
       </div>
+      {FORMAT_OPTIONS.find((option) => option.id === selectedPreset)?.guidance && (
+        <div className="rounded-lg border border-amber-900/50 bg-amber-950/15 px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+          <span className="font-semibold text-amber-300">Quality note: </span>
+          {FORMAT_OPTIONS.find((option) => option.id === selectedPreset)?.guidance}
+        </div>
+      )}
     </div>
   );
 };
