@@ -342,6 +342,56 @@ pub struct MediaMetadata {
     pub capabilities: Option<MediaCapabilities>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProcessingClass {
+    SourcePreserved,
+    MergeOnly,
+    RemuxOnly,
+    AudioTranscode,
+    VideoTranscode,
+    FullTranscode,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamSummary {
+    pub codec: Option<String>,
+    pub bitrate_kbps: Option<u64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fps: Option<f64>,
+    pub hdr: Option<bool>,
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanMediaSummary {
+    pub video: Option<StreamSummary>,
+    pub audio: Option<StreamSummary>,
+    pub container: Option<String>,
+    pub estimated_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanProcessing {
+    pub class: ProcessingClass,
+    pub video_reencoded: Option<bool>,
+    pub audio_reencoded: Option<bool>,
+    pub explanation: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadPlan {
+    pub source: PlanMediaSummary,
+    pub output: PlanMediaSummary,
+    pub processing: PlanProcessing,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedMediaSource {
@@ -473,6 +523,8 @@ pub struct VerificationResult {
     pub checklist: VerificationChecklist,
     pub output_artifact: Option<OutputMediaArtifact>,
     pub fingerprint: Option<MediaFingerprint>,
+    #[serde(default)]
+    pub plan_mismatches: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -535,6 +587,8 @@ pub struct DownloadJob {
     pub fingerprint: Option<MediaFingerprint>,
     pub explainable_result: Option<ExplainableResult>,
     pub verification: Option<VerificationResult>,
+    #[serde(default)]
+    pub download_plan: Option<DownloadPlan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

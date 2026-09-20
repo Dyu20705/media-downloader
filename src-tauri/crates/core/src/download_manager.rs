@@ -87,6 +87,11 @@ impl DownloadManager {
             &valid_url,
             &current_settings,
         );
+        let download_plan = crate::quality_plan::build_download_plan(
+            &request.metadata,
+            request.preset,
+            &request.quality,
+        );
 
         let job_id = format!("job-{}", Local::now().timestamp_millis());
         let now_str = Local::now().to_rfc3339();
@@ -104,6 +109,7 @@ impl DownloadManager {
             final_file_path: None,
             inspection: None,
             verification: None,
+            download_plan: Some(download_plan),
             error_message: None,
             created_at: now_str,
             completed_at: None,

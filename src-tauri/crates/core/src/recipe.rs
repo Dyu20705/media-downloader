@@ -195,6 +195,7 @@ mod tests {
             fingerprint: None,
             explainable_result: None,
             verification: None,
+            download_plan: None,
         };
 
         let recipe = RecipeEngine::create_recipe(&job, None);

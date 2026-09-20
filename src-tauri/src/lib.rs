@@ -34,6 +34,7 @@ pub fn run() {
             commands::resolve_media,
             commands::analyze_media,
             commands::build_command,
+            commands::get_download_plan,
             commands::start_download,
             commands::cancel_download,
             commands::get_active_job,

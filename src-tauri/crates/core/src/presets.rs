@@ -21,7 +21,7 @@ pub fn compile_download_args(
         preset,
         PresetType::BestAudio | PresetType::Mp3 | PresetType::Flac
     );
-    let is_lossy_conversion = preset == PresetType::Flac;
+    let is_lossy_conversion = matches!(preset, PresetType::Mp3 | PresetType::Flac);
 
     // Progress & stdout stream configuration
     args.push("--newline".to_string());
@@ -211,6 +211,7 @@ mod tests {
         assert!(compiled.arguments.contains(&"--audio-format".to_string()));
         assert!(compiled.arguments.contains(&"mp3".to_string()));
         assert!(compiled.is_audio_only);
+        assert!(compiled.is_lossy_conversion);
     }
 
     #[test]

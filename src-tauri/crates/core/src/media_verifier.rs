@@ -6,7 +6,7 @@ use tokio::process::Command;
 use crate::tools::ToolResolver;
 use crate::types::{
     DownloadJob, ExplainableResult, MediaInspection, MediaKind, OutputMediaArtifact,
-    PresetType, TranscodingCost, VerificationChecklist, VerificationResult,
+    PresetType, ProcessingClass, TranscodingCost, VerificationChecklist, VerificationResult,
 };
 
 pub async fn verify_and_inspect_media(
@@ -159,14 +159,82 @@ pub fn generate_verification_and_explanation(
         ]
     };
 
-    let transcoding_cost = job.metadata.transcoding_cost.unwrap_or(TranscodingCost::Merge);
-    let processing_summary = match transcoding_cost {
-        TranscodingCost::StreamCopy => "Direct stream copy (zero bitstream modification)".to_string(),
-        TranscodingCost::Merge => "Merged video and audio bitstreams without video re-encode".to_string(),
-        TranscodingCost::Remux => "Remuxed container packaging (zero re-encoding)".to_string(),
-        TranscodingCost::Transcode => "Transcoded audio to requested target codec".to_string(),
-        TranscodingCost::NoProcessing => "Media acquired".to_string(),
+    let transcoding_cost = job
+        .download_plan
+        .as_ref()
+        .map(|plan| match plan.processing.class {
+            ProcessingClass::SourcePreserved => TranscodingCost::StreamCopy,
+            ProcessingClass::MergeOnly => TranscodingCost::Merge,
+            ProcessingClass::RemuxOnly => TranscodingCost::Remux,
+            ProcessingClass::AudioTranscode
+            | ProcessingClass::VideoTranscode
+            | ProcessingClass::FullTranscode => TranscodingCost::Transcode,
+            ProcessingClass::Unknown => job
+                .metadata
+                .transcoding_cost
+                .unwrap_or(TranscodingCost::NoProcessing),
+        })
+        .unwrap_or_else(|| {
+            job.metadata
+                .transcoding_cost
+                .unwrap_or(TranscodingCost::Merge)
+        });
+    let processing_summary = if let Some(plan) = &job.download_plan {
+        plan.processing.explanation.clone().unwrap_or_else(|| match plan.processing.class {
+            ProcessingClass::SourcePreserved => "Source streams preserved without re-encoding".to_string(),
+            ProcessingClass::MergeOnly => "Streams merged without re-encoding".to_string(),
+            ProcessingClass::RemuxOnly => "Container changed without re-encoding".to_string(),
+            ProcessingClass::AudioTranscode => "Audio transcoded to the requested output codec".to_string(),
+            ProcessingClass::VideoTranscode => "Video transcoded to the requested output codec".to_string(),
+            ProcessingClass::FullTranscode => "Video and audio transcoded".to_string(),
+            ProcessingClass::Unknown => "Processing details unavailable".to_string(),
+        })
+    } else {
+        match transcoding_cost {
+            TranscodingCost::StreamCopy => "Direct stream copy (zero bitstream modification)".to_string(),
+            TranscodingCost::Merge => "Merged video and audio bitstreams without video re-encode".to_string(),
+            TranscodingCost::Remux => "Remuxed container packaging (zero re-encoding)".to_string(),
+            TranscodingCost::Transcode => "Transcoded audio to requested target codec".to_string(),
+            TranscodingCost::NoProcessing => "Media acquired".to_string(),
+        }
     };
+
+    let mut plan_mismatches = Vec::new();
+    if let Some(plan) = &job.download_plan {
+        if let (Some(planned), Some(actual)) = (
+            plan.output.video.as_ref().and_then(|stream| stream.height),
+            inspection.height,
+        ) {
+            if planned != actual {
+                plan_mismatches.push(format!(
+                    "Planned video height was {}p; verified output is {}p",
+                    planned, actual
+                ));
+            }
+        }
+        if let (Some(planned), Some(actual)) = (
+            plan.output.video.as_ref().and_then(|stream| stream.codec.as_deref()),
+            inspection.video_codec.as_deref(),
+        ) {
+            if !codecs_match(planned, actual) {
+                plan_mismatches.push(format!(
+                    "Planned video codec was {}; verified output is {}",
+                    planned, actual
+                ));
+            }
+        }
+        if let (Some(planned), Some(actual)) = (
+            plan.output.audio.as_ref().and_then(|stream| stream.codec.as_deref()),
+            inspection.audio_codec.as_deref(),
+        ) {
+            if !codecs_match(planned, actual) {
+                plan_mismatches.push(format!(
+                    "Planned audio codec was {}; verified output is {}",
+                    planned, actual
+                ));
+            }
+        }
+    }
 
     let explainable_result = ExplainableResult {
         title: job.metadata.title.clone(),
@@ -183,9 +251,29 @@ pub fn generate_verification_and_explanation(
         checklist,
         output_artifact: Some(output_artifact),
         fingerprint: job.fingerprint.clone(),
+        plan_mismatches,
     };
 
     (verification_result, explainable_result)
+}
+
+fn codecs_match(planned: &str, actual: &str) -> bool {
+    fn family(codec: &str) -> &str {
+        let codec = codec.split('.').next().unwrap_or(codec);
+        if codec.eq_ignore_ascii_case("avc1") || codec.eq_ignore_ascii_case("h264") {
+            "h264"
+        } else if codec.eq_ignore_ascii_case("mp4a") || codec.eq_ignore_ascii_case("aac") {
+            "aac"
+        } else if codec.eq_ignore_ascii_case("vp09") || codec.eq_ignore_ascii_case("vp9") {
+            "vp9"
+        } else if codec.eq_ignore_ascii_case("av01") || codec.eq_ignore_ascii_case("av1") {
+            "av1"
+        } else {
+            codec
+        }
+    }
+
+    family(planned).eq_ignore_ascii_case(family(actual))
 }
 
 async fn inspect_with_ffprobe(
