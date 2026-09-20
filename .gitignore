@@ -31,6 +31,7 @@ temp_downloads/
 *.wav
 *.mkv
 *.ts
+!src/**/*.ts
 
 # Bundles and release packages
 *.AppImage
@@ -47,4 +48,3 @@ release/
 Thumbs.db
 .env
 !.env.example
-
