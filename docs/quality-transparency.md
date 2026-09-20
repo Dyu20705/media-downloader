@@ -171,9 +171,9 @@ Suggested mapping from resolver behavior:
 
 The backend remains authoritative because actual command construction and container compatibility decisions live there.
 
-## 6. Backend contract
+## 6. Future backend contract (Slice 2)
 
-The Analyze response or a preset-resolution command should expose a normalized plan. Exact naming can follow existing Rust/IPC conventions, but the data should be equivalent to:
+This contract is design guidance and is not implemented in Slice 1. A future Analyze response or preset-resolution command should expose a normalized plan. Exact naming can follow existing Rust/IPC conventions, but the data should be equivalent to:
 
 ```ts
 interface DownloadPlan {
@@ -195,9 +195,11 @@ interface DownloadPlan {
     audioReencoded: boolean | null;
     explanation?: string;
   };
+  warnings: string[];
 }
 
 interface StreamSummary {
+  formatId?: string;
   codec?: string;
   bitrateKbps?: number;
   width?: number;

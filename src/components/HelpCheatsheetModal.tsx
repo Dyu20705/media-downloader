@@ -66,11 +66,15 @@ export const HelpCheatsheetModal: React.FC<HelpCheatsheetModalProps> = ({
               </div>
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
                 <div className="font-semibold text-zinc-100">Best Audio</div>
-                <div className="text-zinc-400">Extracts source audio stream (Opus/AAC) directly with 0% generational loss.</div>
+                <div className="text-zinc-400">Preserves the best available source audio format when possible, without an unnecessary lossy transcode.</div>
               </div>
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
                 <div className="font-semibold text-zinc-100">MP3</div>
-                <div className="text-zinc-400">Universal 320 kbps CBR MP3 audio compatible with legacy players.</div>
+                <div className="text-zinc-400">Compatibility-oriented lossy output using the encoder's highest-quality VBR setting.</div>
+              </div>
+              <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
+                <div className="font-semibold text-zinc-100">FLAC</div>
+                <div className="text-zinc-400">FLAC encoding is lossless, but it cannot restore information missing from a lossy source.</div>
               </div>
             </div>
           </section>
