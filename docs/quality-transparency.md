@@ -1,6 +1,6 @@
 # Quality Transparency & Download Plan Design
 
-Status: **Implemented**
+Status: **Slice 1 implemented; Slice 2 next**
 Owner: media-downloader
 Target branch: `feat/quality-transparency-v1`
 
@@ -69,7 +69,7 @@ Lower-cost processing should be preferred when it satisfies the requested intent
 
 ## 4. UX model
 
-The analyzed workspace exposes a `DownloadPlanCard` below the format and quality controls.
+After Slice 2 provides an authoritative normalized backend plan, Slice 3 may expose a `DownloadPlanCard` below the format and quality controls. The frontend must not infer this plan itself.
 
 ### 4.1 Source section
 
@@ -116,7 +116,7 @@ Example MP3 conversion:
 
 ```text
 PLANNED OUTPUT
-MP3 · up to 320 kbps output
+MP3 · compatibility-oriented transcode
 
 PROCESSING
 ⚠ Audio transcode
@@ -229,7 +229,7 @@ Intent: compatibility, not quality enhancement.
 Required message:
 
 - MP3 is a lossy transcode for most web-media sources.
-- `320 kbps` describes the requested/output encoding target, not guaranteed source information.
+- The encoder quality setting describes the output request; it is not evidence of source quality.
 - Re-encoding cannot restore detail absent from the source.
 
 ### FLAC
@@ -250,7 +250,8 @@ Required message:
   - preset intent and concise quality guidance
 - `src/components/MediaSummaryCard.tsx`
   - source identity remains here; avoid duplicating title/uploader information in the plan
-- new `src/components/DownloadPlanCard.tsx`
+- future `src/components/DownloadPlanCard.tsx` (Slice 3, only after Slice 2)
+  - consume the normalized backend plan
   - source stream summary
   - planned output summary
   - processing classification
@@ -346,18 +347,20 @@ Confirm that the pre-download plan matches the resolver and that post-download a
 - Add contextual quality note to the selected audio preset.
 - Update README wording.
 
-### Slice 2 — normalized backend download plan (implemented)
+### Slice 2 — normalized backend download plan (NEXT)
 
-- Add IPC model for source/output stream summaries.
-- Expose processing classification from resolver decisions.
-- Ensure `unknown` is explicit rather than guessed.
+- Define the Rust `DownloadPlan`/`ProcessingKind` contract first.
+- Make one backend resolver return both execution arguments and the normalized `DownloadPlan`; do not maintain a second format-selection heuristic.
+- Cover source-preserved, merge, remux, audio/video/full transcode, and insufficient-metadata → `Unknown` with unit tests before UI work.
+- Add `warnings: Vec<String>` and preserve exact selected stream identity when available.
+- Expose the normalized plan through Tauri IPC only after resolver tests are green.
 
-### Slice 3 — pre-download `DownloadPlanCard` (implemented)
+### Slice 3 — pre-download `DownloadPlanCard` (after Slice 2)
 
 - Render source, planned output, and processing.
 - Refresh plan when preset/quality selection changes.
 
-### Slice 4 — verified actual output (implemented)
+### Slice 4 — verified actual output (after Slice 3)
 
 - Map verifier output to `Actual output` UI.
 - Surface material plan-vs-actual differences.

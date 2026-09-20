@@ -8,8 +8,8 @@ use crate::core::settings::SettingsManager;
 use crate::core::tools::ToolResolver;
 use crate::core::types::{
     AppSettings, BuildCommandRequest, BuildCommandResponse, DiagnosticLog, DownloadJob,
-    DownloadPlan, MediaMetadata, PresetType, ResolvedMediaSource, StartDownloadRequest, ToolHealth,
-    ToolStatusInfo, ToolsManifest,
+    MediaMetadata, ResolvedMediaSource, StartDownloadRequest, ToolHealth, ToolStatusInfo,
+    ToolsManifest,
 };
 use crate::core::universal_resolver::UniversalResolver;
 
@@ -18,15 +18,6 @@ pub struct AppState {
     pub diagnostics: Arc<DiagnosticsBuffer>,
     pub settings: Arc<SettingsManager>,
     pub download_manager: Arc<DownloadManager>,
-}
-
-#[tauri::command]
-pub async fn get_download_plan(
-    metadata: MediaMetadata,
-    preset: PresetType,
-    quality: String,
-) -> Result<DownloadPlan, String> {
-    Ok(crate::core::quality_plan::build_download_plan(&metadata, preset, &quality))
 }
 
 #[tauri::command]

@@ -11,7 +11,6 @@ pub mod path_validator;
 pub mod presets;
 pub mod process_runner;
 pub mod progress_parser;
-pub mod quality_plan;
 pub mod recipe;
 pub mod recommendation_engine;
 pub mod settings;

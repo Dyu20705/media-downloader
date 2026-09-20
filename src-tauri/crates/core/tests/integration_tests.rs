@@ -96,7 +96,7 @@ fn test_all_preset_compilation() {
         &settings,
     );
     assert!(flac.is_audio_only);
-    assert!(flac.is_lossy_conversion);
+    assert!(!flac.is_lossy_conversion);
     assert!(flac.arguments.contains(&"flac".to_string()));
 }
 

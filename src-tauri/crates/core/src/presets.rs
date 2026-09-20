@@ -21,7 +21,7 @@ pub fn compile_download_args(
         preset,
         PresetType::BestAudio | PresetType::Mp3 | PresetType::Flac
     );
-    let is_lossy_conversion = matches!(preset, PresetType::Mp3 | PresetType::Flac);
+    let is_lossy_conversion = preset == PresetType::Mp3;
 
     // Progress & stdout stream configuration
     args.push("--newline".to_string());
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flac_lossy_warning() {
+    fn test_flac_is_not_marked_as_lossy_conversion() {
         let settings = AppSettings::default();
         let compiled = compile_download_args(
             PresetType::Flac,
@@ -225,7 +225,7 @@ mod tests {
             &settings,
         );
 
-        assert!(compiled.is_lossy_conversion);
+        assert!(!compiled.is_lossy_conversion);
         assert!(compiled.arguments.contains(&"flac".to_string()));
     }
 

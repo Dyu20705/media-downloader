@@ -11,7 +11,6 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronUp,
-  AlertTriangle,
 } from 'lucide-react';
 import {
   DownloadJob,
@@ -39,8 +38,6 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
   const verification = job.verification;
   const fingerprint = job.fingerprint;
   const recipe = job.recipe;
-  const planMismatches = (verification as (VerificationResult & { planMismatches?: string[] }) | undefined)
-    ?.planMismatches ?? [];
 
   const handleCopyRecipe = () => {
     if (recipe) {
@@ -103,48 +100,6 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
           </div>
         )}
       </div>
-
-      {verification?.isValid && job.inspection && (
-        <div className="mb-4 rounded-xl border border-emerald-900/50 bg-emerald-950/15 p-3.5">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
-              Actual output
-            </span>
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400">
-              <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> Verified
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-300">
-            {job.inspection.height && (
-              <span>
-                {job.inspection.width ? `${job.inspection.width}×` : ''}{job.inspection.height}
-                {job.inspection.fps ? ` · ${Math.round(job.inspection.fps)} fps` : ''}
-                {job.inspection.isHdr ? ' · HDR' : ''}
-              </span>
-            )}
-            {job.inspection.videoCodec && <span>Video: {job.inspection.videoCodec.toUpperCase()}</span>}
-            {job.inspection.audioCodec && (
-              <span>
-                Audio: {job.inspection.audioCodec.toUpperCase()}
-                {job.inspection.audioBitrateKbps ? ` · ${job.inspection.audioBitrateKbps} kbps` : ''}
-              </span>
-            )}
-            <span>{job.inspection.containerFormat.toUpperCase()}</span>
-            <span>{(job.inspection.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
-          </div>
-          {planMismatches.length > 0 && (
-            <div className="mt-3 border-t border-amber-900/40 pt-2" role="status">
-              <p className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-amber-300">
-                <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-                Actual output differs from the plan
-              </p>
-              <ul className="space-y-0.5 text-[11px] text-amber-200/80">
-                {planMismatches.map((mismatch: string) => <li key={mismatch}>• {mismatch}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Verification Checklist Grid */}
       <div className="mb-4">
