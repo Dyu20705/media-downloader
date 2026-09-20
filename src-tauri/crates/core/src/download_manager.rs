@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use chrono::Local;
@@ -158,7 +158,6 @@ impl DownloadManager {
         let active_handle_clone = self.active_handle.clone();
         let media_id = request.metadata.id.clone();
         let is_lossy_warning = compiled.is_lossy_conversion;
-        let expected_ext = compiled.output_extension.clone();
 
         tokio::spawn(async move {
             let mut state_machine = DownloadStateMachine::with_state(DownloadStatus::Downloading);
@@ -241,10 +240,10 @@ impl DownloadManager {
                         if p.exists() {
                             Some(p)
                         } else {
-                            resolve_final_download_path(&output_dir_path, &media_id, &expected_ext)
+                            resolve_final_download_path(&output_dir_path, &media_id)
                         }
                     } else {
-                        resolve_final_download_path(&output_dir_path, &media_id, &expected_ext)
+                        resolve_final_download_path(&output_dir_path, &media_id)
                     };
 
                     match final_path {
@@ -352,7 +351,7 @@ impl DownloadManager {
     }
 
     pub async fn cancel_download(&self, job_id: &str) -> Result<DownloadJob, String> {
-        let mut handle_guard = self.active_handle.lock().await;
+        let handle_guard = self.active_handle.lock().await;
         if let Some(handle) = handle_guard.as_ref() {
             if handle.job_id == job_id {
                 let _ = handle.cancel_sender.send(()).await;

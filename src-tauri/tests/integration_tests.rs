@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use one_click_media_downloader_lib::core::analyzer::{analyze_media_metadata, parse_ytdlp_json};
-use one_click_media_downloader_lib::core::diagnostics::DiagnosticsBuffer;
 use one_click_media_downloader_lib::core::path_validator::{
     sanitize_file_name, validate_and_ensure_directory,
 };
@@ -11,6 +10,12 @@ use one_click_media_downloader_lib::core::types::{
     AppSettings, DownloadStatus, MediaKind, PresetType,
 };
 use one_click_media_downloader_lib::core::url_validator::validate_media_url;
+
+fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
+    arguments
+        .windows(2)
+        .any(|pair| pair[0] == flag && pair[1] == value)
+}
 
 #[test]
 fn test_url_validation() {
@@ -50,9 +55,7 @@ fn test_all_preset_compilation() {
         "https://example.com/watch?v=123",
         &settings,
     );
-    assert_eq!(mp4.output_extension, "mp4");
-    assert!(mp4.arguments.contains(&"--merge-output-format".to_string()));
-    assert!(mp4.arguments.contains(&"mp4".to_string()));
+    assert!(has_arg_pair(&mp4.arguments, "--merge-output-format", "mp4"));
 
     // 2. Best Video
     let best_vid = compile_download_args(
@@ -62,8 +65,12 @@ fn test_all_preset_compilation() {
         "https://example.com/watch?v=123",
         &settings,
     );
-    assert_eq!(best_vid.output_extension, "mkv");
-    assert!(best_vid.arguments.contains(&"mkv".to_string()));
+    assert!(has_arg_pair(&best_vid.arguments, "-f", "bv+ba/b"));
+    assert!(has_arg_pair(
+        &best_vid.arguments,
+        "--merge-output-format",
+        "mkv"
+    ));
 
     // 3. Best Audio
     let best_aud = compile_download_args(
@@ -75,6 +82,9 @@ fn test_all_preset_compilation() {
     );
     assert!(best_aud.is_audio_only);
     assert!(best_aud.arguments.contains(&"-x".to_string()));
+    assert!(has_arg_pair(&best_aud.arguments, "-f", "bestaudio/b"));
+    assert!(!best_aud.arguments.contains(&"--audio-format".to_string()));
+    assert!(!best_aud.is_lossy_conversion);
 
     // 4. MP3
     let mp3 = compile_download_args(
@@ -85,7 +95,9 @@ fn test_all_preset_compilation() {
         &settings,
     );
     assert!(mp3.is_audio_only);
-    assert!(mp3.arguments.contains(&"mp3".to_string()));
+    assert!(mp3.is_lossy_conversion);
+    assert!(has_arg_pair(&mp3.arguments, "--audio-format", "mp3"));
+    assert!(has_arg_pair(&mp3.arguments, "--audio-quality", "0"));
 
     // 5. FLAC
     let flac = compile_download_args(
@@ -97,7 +109,7 @@ fn test_all_preset_compilation() {
     );
     assert!(flac.is_audio_only);
     assert!(!flac.is_lossy_conversion);
-    assert!(flac.arguments.contains(&"flac".to_string()));
+    assert!(has_arg_pair(&flac.arguments, "--audio-format", "flac"));
 }
 
 #[test]
