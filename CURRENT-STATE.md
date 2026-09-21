@@ -169,7 +169,7 @@ Pinned tool versions in source are yt-dlp `2025.02.19`, FFmpeg/FFprobe `7.1`, an
 
 ## 9. Verification evidence
 
-The following local checks were recorded as passing before this review commit:
+The following local checks completed successfully after the branch hardening changes:
 
 | Command | Result |
 | --- | --- |
@@ -177,13 +177,13 @@ The following local checks were recorded as passing before this review commit:
 | `npm run build` | Pass — production Vite bundle; benign dependency `use client` warnings only |
 | `cargo fmt --all --check` in `src-tauri/crates/core` | Pass |
 | `cargo clippy --all-targets -- -D warnings` in `src-tauri/crates/core` | Pass |
-| `cargo test` in `src-tauri/crates/core` | Pass — 46 unit + 7 integration + 7 tool-manager tests |
+| `cargo test` in `src-tauri/crates/core` | Pass — 46 unit + 7 integration + 9 tool-manager tests |
 | `cargo fmt --all --check` in `src-tauri` | Pass |
 | `cargo clippy --all-targets -- -D warnings` in `src-tauri` | Pass |
 | `cargo test` in `src-tauri` | Pass — 6 integration tests |
 | `git diff --check` | Pass |
 
-Total Rust tests recorded across the two crates: 66. The regression tests added in this review still require execution after the branch update; these recorded results do not replace packaged desktop or live-provider testing.
+Total Rust tests executed across the two crates: 68. These results validate the branch development tree; they do not replace packaged desktop or live-provider testing.
 
 ## 10. Recommended next implementation order
 

@@ -351,11 +351,7 @@ fn test_manifest_can_be_replaced_repeatedly() {
 #[test]
 fn test_all_pinned_checksums_are_sha256_shaped() {
     for spec in PINNED_TOOLS {
-        for checksum in [
-            spec.windows_sha256,
-            spec.linux_sha256,
-            spec.darwin_sha256,
-        ] {
+        for checksum in [spec.windows_sha256, spec.linux_sha256, spec.darwin_sha256] {
             assert_eq!(
                 checksum.len(),
                 64,
