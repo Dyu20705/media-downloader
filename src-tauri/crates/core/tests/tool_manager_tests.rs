@@ -325,3 +325,48 @@ async fn test_reinstall_and_repair_flow() {
     let status_repaired = manager.check_tool_status("yt-dlp", None).await;
     assert_eq!(status_repaired.status, ToolStatus::Ready);
 }
+
+#[test]
+fn test_manifest_can_be_replaced_repeatedly() {
+    let tools_dir = tempdir().unwrap();
+    let manager = ToolManager::new(
+        Some(tools_dir.path().to_path_buf()),
+        Arc::new(DiagnosticsBuffer::new()),
+    );
+
+    let mut manifest = manager.load_manifest();
+    manifest.schema_version = 1;
+    manifest.last_updated = "first".to_string();
+    manager.save_manifest_atomic(&manifest).unwrap();
+
+    manifest.schema_version = 2;
+    manifest.last_updated = "second".to_string();
+    manager.save_manifest_atomic(&manifest).unwrap();
+
+    let loaded = manager.load_manifest();
+    assert_eq!(loaded.schema_version, 2);
+    assert_eq!(loaded.last_updated, "second");
+}
+
+#[test]
+fn test_all_pinned_checksums_are_sha256_shaped() {
+    for spec in PINNED_TOOLS {
+        for checksum in [
+            spec.windows_sha256,
+            spec.linux_sha256,
+            spec.darwin_sha256,
+        ] {
+            assert_eq!(
+                checksum.len(),
+                64,
+                "{} has a malformed SHA-256 pin",
+                spec.name
+            );
+            assert!(
+                checksum.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "{} has a non-hex SHA-256 pin",
+                spec.name
+            );
+        }
+    }
+}

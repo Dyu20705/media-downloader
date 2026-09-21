@@ -4,7 +4,7 @@ use crate::types::{
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 pub async fn verify_and_inspect_media(
@@ -249,16 +249,20 @@ async fn inspect_with_ffprobe(
     file_size_bytes: u64,
     is_lossy_transcode_warning: bool,
 ) -> Result<MediaInspection, String> {
-    let output = Command::new(ffprobe_bin)
+    let mut command = Command::new(ffprobe_bin);
+    command
         .arg("-v")
         .arg("quiet")
         .arg("-print_format")
         .arg("json")
         .arg("-show_format")
         .arg("-show_streams")
-        .arg(file_path)
-        .output()
+        .arg("-show_chapters")
+        .arg(file_path);
+
+    let output = tokio::time::timeout(Duration::from_secs(20), command.output())
         .await
+        .map_err(|_| "ffprobe timed out after 20 seconds".to_string())?
         .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
 
     if !output.status.success() {

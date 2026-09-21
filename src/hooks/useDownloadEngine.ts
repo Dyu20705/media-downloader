@@ -4,9 +4,9 @@ import type { AppError, DownloadJob, StartDownloadRequest } from '../types';
 
 const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
-function normalizeError(error: unknown): AppError {
+function normalizeError(error: unknown, userMessage: string): AppError {
   const technicalDetails = error instanceof Error ? error.message : String(error);
-  return { userMessage: 'The download could not be started.', technicalDetails };
+  return { userMessage, technicalDetails };
 }
 
 function upsertJob(jobs: DownloadJob[], job: DownloadJob): DownloadJob[] {
@@ -62,7 +62,7 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
     try {
       acceptJob(await ipc.startDownload(request));
     } catch (error) {
-      setDownloadError(normalizeError(error));
+      setDownloadError(normalizeError(error, 'The download could not be started.'));
       void onDiagnosticsUpdate().catch(() => undefined);
     }
   }, [acceptJob, onDiagnosticsUpdate]);
@@ -71,7 +71,7 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
     try {
       acceptJob(await ipc.cancelDownload(jobId));
     } catch (error) {
-      setDownloadError(normalizeError(error));
+      setDownloadError(normalizeError(error, 'The download could not be cancelled.'));
     }
   }, [acceptJob]);
 

@@ -116,7 +116,11 @@ pub async fn get_active_job(state: State<'_, AppState>) -> Result<Option<Downloa
 
 #[tauri::command]
 pub async fn get_tool_status(state: State<'_, AppState>) -> Result<Vec<ToolHealth>, String> {
-    Ok(state.tool_resolver.get_all_tools_health().await)
+    let settings = state.settings.get_settings();
+    Ok(state
+        .tool_resolver
+        .get_all_tools_health_with_settings(Some(&settings))
+        .await)
 }
 
 #[tauri::command]

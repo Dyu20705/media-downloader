@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::process::Command;
 
 use crate::diagnostics::DiagnosticsBuffer;
@@ -106,6 +107,19 @@ pub fn get_pinned_tool_spec(name: &str) -> Option<&'static PinnedToolSpec> {
     PINNED_TOOLS
         .iter()
         .find(|t| t.name.eq_ignore_ascii_case(name))
+}
+
+const TOOL_VALIDATION_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_TOOL_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
+
+fn platform_artifact(spec: &PinnedToolSpec) -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        (spec.windows_url, spec.windows_sha256)
+    } else if cfg!(target_os = "macos") {
+        (spec.darwin_url, spec.darwin_sha256)
+    } else {
+        (spec.linux_url, spec.linux_sha256)
+    }
 }
 
 fn parse_date_version(value: &str) -> Option<(u32, u32, u32)> {
@@ -237,10 +251,8 @@ impl ToolManager {
         fs::create_dir_all(tools_dir).map_err(|e| format!("Failed to create tools dir: {}", e))?;
 
         let manifest_path = self.get_manifest_path();
-        let tmp_path = tools_dir.join(format!(
-            "manifest.{}.tmp",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
-        ));
+        let nonce = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let tmp_path = tools_dir.join(format!("manifest.{nonce}.tmp"));
 
         let json_data = serde_json::to_string_pretty(manifest)
             .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
@@ -248,8 +260,34 @@ impl ToolManager {
         fs::write(&tmp_path, json_data)
             .map_err(|e| format!("Failed to write manifest temp file: {}", e))?;
 
-        fs::rename(&tmp_path, &manifest_path)
-            .map_err(|e| format!("Failed to atomically commit manifest: {}", e))?;
+        #[cfg(not(windows))]
+        {
+            fs::rename(&tmp_path, &manifest_path)
+                .map_err(|e| format!("Failed to atomically commit manifest: {}", e))?;
+        }
+
+        #[cfg(windows)]
+        {
+            let backup_path = tools_dir.join(format!("manifest.{nonce}.bak"));
+            let had_manifest = manifest_path.exists();
+
+            if had_manifest {
+                fs::rename(&manifest_path, &backup_path)
+                    .map_err(|e| format!("Failed to stage previous manifest: {}", e))?;
+            }
+
+            if let Err(error) = fs::rename(&tmp_path, &manifest_path) {
+                if had_manifest {
+                    let _ = fs::rename(&backup_path, &manifest_path);
+                }
+                let _ = fs::remove_file(&tmp_path);
+                return Err(format!("Failed to commit replacement manifest: {}", error));
+            }
+
+            if had_manifest {
+                let _ = fs::remove_file(&backup_path);
+            }
+        }
 
         Ok(())
     }
@@ -283,21 +321,11 @@ impl ToolManager {
 
     /// Validate executable by invoking its version argument
     pub async fn validate_executable(tool_name: &str, path: &Path) -> Result<String, String> {
-        if !path.exists() {
-            return Err(format!("Executable does not exist at {:?}", path));
-        }
-
-        // Ensure executable permissions on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(metadata) = fs::metadata(path) {
-                let mut perms = metadata.permissions();
-                if perms.mode() & 0o111 == 0 {
-                    perms.set_mode(perms.mode() | 0o755);
-                    let _ = fs::set_permissions(path, perms);
-                }
-            }
+        if !path.exists() || !path.is_file() {
+            return Err(format!(
+                "Executable does not exist or is not a regular file: {:?}",
+                path
+            ));
         }
 
         let version_arg = match tool_name.to_lowercase().as_str() {
@@ -308,10 +336,16 @@ impl ToolManager {
             _ => "--version",
         };
 
-        let output = Command::new(path)
-            .arg(version_arg)
-            .output()
+        let mut command = Command::new(path);
+        command.arg(version_arg);
+        let output = tokio::time::timeout(TOOL_VALIDATION_TIMEOUT, command.output())
             .await
+            .map_err(|_| {
+                format!(
+                    "Executable validation timed out after {} seconds",
+                    TOOL_VALIDATION_TIMEOUT.as_secs()
+                )
+            })?
             .map_err(|e| format!("Failed to spawn executable validation: {}", e))?;
 
         if !output.status.success() {
@@ -558,21 +592,7 @@ impl ToolManager {
 
         let resolved = self.resolve_tool(tool_name, settings).await;
 
-        let source_url = if cfg!(windows) {
-            spec.windows_url
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_url
-        } else {
-            spec.linux_url
-        };
-
-        let expected_sha256 = if cfg!(windows) {
-            spec.windows_sha256
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_sha256
-        } else {
-            spec.linux_sha256
-        };
+        let (source_url, expected_sha256) = platform_artifact(spec);
 
         match resolved {
             Some(tool) => {
@@ -761,8 +781,11 @@ impl ToolManager {
     }
 
     /// Backward-compatible health report
-    pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
-        let statuses = self.get_all_tool_statuses(None).await;
+    pub async fn get_all_tools_health_with_settings(
+        &self,
+        settings: Option<&AppSettings>,
+    ) -> Vec<ToolHealth> {
+        let statuses = self.get_all_tool_statuses(settings).await;
         statuses
             .into_iter()
             .map(|s| {
@@ -784,6 +807,10 @@ impl ToolManager {
             .collect()
     }
 
+    pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
+        self.get_all_tools_health_with_settings(None).await
+    }
+
     /// Install tool atomically:
     /// 1. Download to temporary file in staging directory
     /// 2. Verify SHA-256
@@ -802,21 +829,7 @@ impl ToolManager {
             &format!("Starting atomic installation for {}", tool_name),
         );
 
-        let source_url = if cfg!(windows) {
-            spec.windows_url
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_url
-        } else {
-            spec.linux_url
-        };
-
-        let expected_sha256 = if cfg!(windows) {
-            spec.windows_sha256
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_sha256
-        } else {
-            spec.linux_sha256
-        };
+        let (source_url, expected_sha256) = platform_artifact(spec);
 
         let staging_dir = self.get_staging_dir();
         fs::create_dir_all(&staging_dir)
@@ -843,7 +856,7 @@ impl ToolManager {
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-        let response = client
+        let mut response = client
             .get(source_url)
             .send()
             .await
@@ -856,10 +869,39 @@ impl ToolManager {
             ));
         }
 
-        let bytes = response
-            .bytes()
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_TOOL_DOWNLOAD_BYTES)
+        {
+            return Err(format!(
+                "Tool archive exceeds the {} MiB download limit",
+                MAX_TOOL_DOWNLOAD_BYTES / (1024 * 1024)
+            ));
+        }
+
+        let capacity = response
+            .content_length()
+            .unwrap_or(0)
+            .min(MAX_TOOL_DOWNLOAD_BYTES) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|e| format!("Failed to read response stream: {}", e))?;
+            .map_err(|e| format!("Failed to read response stream: {}", e))?
+        {
+            let next_len = bytes
+                .len()
+                .checked_add(chunk.len())
+                .ok_or_else(|| "Tool download size overflow".to_string())?;
+            if next_len > MAX_TOOL_DOWNLOAD_BYTES as usize {
+                return Err(format!(
+                    "Tool archive exceeds the {} MiB download limit",
+                    MAX_TOOL_DOWNLOAD_BYTES / (1024 * 1024)
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
 
         fs::write(&tmp_file_path, &bytes)
             .map_err(|e| format!("Failed to write staging file: {}", e))?;
@@ -1135,14 +1177,7 @@ impl ToolManager {
             pinned_version: spec.pinned_version.to_string(),
             path: Some(final_destination.to_string_lossy().to_string()),
             managed: true,
-            source_url: Some(
-                if cfg!(windows) {
-                    spec.windows_url
-                } else {
-                    spec.linux_url
-                }
-                .to_string(),
-            ),
+            source_url: Some(platform_artifact(spec).0.to_string()),
             sha256: Some(bin_sha),
             error_message: None,
             license: spec.license.to_string(),

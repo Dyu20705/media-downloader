@@ -61,8 +61,17 @@ impl ToolResolver {
         self.manager.get_all_tool_statuses(settings).await
     }
 
+    pub async fn get_all_tools_health_with_settings(
+        &self,
+        settings: Option<&AppSettings>,
+    ) -> Vec<ToolHealth> {
+        self.manager
+            .get_all_tools_health_with_settings(settings)
+            .await
+    }
+
     pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
-        self.manager.get_all_tools_health().await
+        self.get_all_tools_health_with_settings(None).await
     }
 
     pub async fn check_health(&self) -> Vec<ToolHealth> {

@@ -11,12 +11,20 @@ export function useToolEngine() {
   const fetchTools = useCallback(async () => {
     setIsRefreshingTools(true);
     try {
-      const [health, detailed] = await Promise.all([
-        ipc.getToolStatus(),
-        ipc.getDetailedToolStatus(),
-      ]);
-      setTools(health);
+      const detailed = await ipc.getDetailedToolStatus();
       setToolStatuses(detailed);
+      setTools(
+        detailed.map((tool) => ({
+          name: tool.name,
+          available: tool.status === 'READY',
+          path: tool.path,
+          version: tool.version,
+          repairMessage:
+            tool.status === 'READY'
+              ? null
+              : tool.errorMessage ?? `Click Repair to install ${tool.name}`,
+        })),
+      );
     } finally {
       setIsRefreshingTools(false);
     }

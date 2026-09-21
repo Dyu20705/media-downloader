@@ -1,7 +1,7 @@
 # Media Downloader — Current State
 
 > Snapshot: 2026-09-21
-> Branch: `dev`
+> Branch: `fix/runtime-hardening-and-current-state`
 > Baseline commit: `c1cb7682f87590e92b23b1945f890bb51b4016d1` (`p0.0`, 2026-09-20)
 > Source of truth for the target product: [`design-master.md`](design-master.md)
 
@@ -22,7 +22,7 @@ URL
 
 The current product is a reliable development baseline, not the completed product described by `design-master.md`. Slice 0 (Baseline Integrity) is complete. Parts of quality transparency and platform hardening exist, but the canonical `AcquisitionPlan`, persistent queue/history, structured recovery, playlist workflow, operation model, and finishing tools are not implemented end to end.
 
-The working tree also contains uncommitted hardening changes beyond the baseline commit. This document describes that working-tree state. Those hardening changes and this document have not been committed or pushed.
+This branch contains runtime-hardening changes beyond the baseline commit. This document describes the branch state rather than an uncommitted local working tree.
 
 ## 2. What works now
 
@@ -144,13 +144,14 @@ Implemented safeguards include:
 - output-directory validation;
 - process-tree cleanup;
 - diagnostics redaction;
-- staged managed-tool installation;
+- staged managed-tool installation with a bounded 256 MiB download size;
 - SHA-256 validation and manifest-bound checks for managed binaries;
+- executable validation and ffprobe inspection are time-bounded so hung helper processes cannot stall these checks indefinitely;
 - custom tool paths resolved from current settings.
 
 Known boundary: DNS validation occurs before handing the URL to external tools. Redirects followed internally by yt-dlp/FFmpeg cannot be revalidated by the application at every hop. Complete redirect-time SSRF enforcement would require a controlled proxy/network sandbox or equivalent egress policy.
 
-Pinned tool versions in source are yt-dlp `2025.02.19`, FFmpeg/FFprobe `7.1`, and MediaInfo `24.12`. This document does not assert that those are current upstream releases; release maintenance and platform artifact verification remain owner responsibilities.
+Pinned tool versions in source are yt-dlp `2025.02.19`, FFmpeg/FFprobe `7.1`, and MediaInfo `24.12`. This document does not assert that those are current upstream releases or that every embedded upstream checksum has independent provenance evidence in this repository. The Linux FFmpeg/FFprobe source is release-oriented rather than version-qualified, so immutable artifact pinning remains release work even though checksum mismatches fail closed.
 
 ## 8. Known gaps and risks
 
@@ -162,12 +163,13 @@ Pinned tool versions in source are yt-dlp `2025.02.19`, FFmpeg/FFprobe `7.1`, an
 6. **Progress is polling-based.** `docs/architecture.md` currently claims zero polling/SSE, while the implementation polls at 400 ms. That documentation is stale.
 7. **Quality documentation is stale.** `docs/quality-transparency.md` uses an older slice numbering/status and should be reconciled after the canonical planner lands.
 8. **No frontend automated test suite.** Type checking and production bundling cover compilation, but there are no component/hook tests or end-to-end desktop tests in `package.json`.
-9. **Cross-platform release validation is incomplete.** Rust unit/integration tests exercise core behavior locally; packaged Windows/macOS/Linux install, tool bootstrap, cancellation, and real-download matrices still need explicit release testing.
-10. **Command preview is product-facing raw machinery.** `build_command` remains in IPC even though the target design calls for plan-first product APIs and removal of raw command construction from the product surface.
+9. **Cross-platform release validation is incomplete.** Rust unit/integration tests exercise core behavior locally; packaged Windows/macOS/Linux install, tool bootstrap, cancellation, and real-download matrices still need explicit release testing. In particular, the macOS FFmpeg/FFprobe pins currently point to `.7z` artifacts while the installer only has ZIP and Unix `tar` extraction paths, so managed installation on macOS is not release-ready.
+10. **Managed-tool pins are not yet a release-grade provenance system.** Checksums are enforced, but pin provenance/refresh is manual and the Linux FFmpeg/FFprobe source URL is not immutable.
+11. **Command preview is product-facing raw machinery.** `build_command` remains in IPC even though the target design calls for plan-first product APIs and removal of raw command construction from the product surface.
 
-## 9. Verification evidence for this working tree
+## 9. Verification evidence
 
-The latest local verification completed successfully after the hardening changes:
+The following local checks were recorded as passing before this review commit:
 
 | Command | Result |
 | --- | --- |
@@ -181,7 +183,7 @@ The latest local verification completed successfully after the hardening changes
 | `cargo test` in `src-tauri` | Pass — 6 integration tests |
 | `git diff --check` | Pass |
 
-Total Rust tests executed across the two crates: 66. These results validate the local development tree; they do not replace packaged desktop or live-provider testing.
+Total Rust tests recorded across the two crates: 66. The regression tests added in this review still require execution after the branch update; these recorded results do not replace packaged desktop or live-provider testing.
 
 ## 10. Recommended next implementation order
 
