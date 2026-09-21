@@ -1,4 +1,6 @@
+use std::net::IpAddr;
 use thiserror::Error;
+use url::{Host, Url};
 
 #[derive(Error, Debug, PartialEq)]
 pub enum UrlValidationError {
@@ -14,65 +16,111 @@ pub enum UrlValidationError {
     TooLong,
     #[error("Localhost and private network addresses are prohibited for security")]
     ProhibitedHost,
+    #[error("Could not resolve URL host: {0}")]
+    HostResolutionFailed(String),
 }
 
-pub fn validate_media_url(raw_url: &str) -> Result<String, UrlValidationError> {
+fn is_prohibited_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+        }
+        IpAddr::V6(ip) => {
+            if let Some(ipv4) = ip.to_ipv4_mapped() {
+                return is_prohibited_ip(IpAddr::V4(ipv4));
+            }
+            ip.is_loopback()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+        }
+    }
+}
+
+fn parsed_public_url(raw_url: &str) -> Result<Url, UrlValidationError> {
     let trimmed = raw_url.trim();
     if trimmed.is_empty() {
         return Err(UrlValidationError::EmptyUrl);
     }
-
     if trimmed.len() > 2048 {
         return Err(UrlValidationError::TooLong);
     }
-
-    // Reject null bytes, control characters, newlines
-    if trimmed
-        .chars()
-        .any(|c| c.is_control() || c == '\0' || c == '\n' || c == '\r')
-    {
+    if trimmed.chars().any(char::is_control) {
         return Err(UrlValidationError::InvalidCharacters);
     }
 
-    // Require HTTP or HTTPS scheme
-    let lower = trimmed.to_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
-        let scheme = trimmed.split("://").next().unwrap_or("unknown").to_string();
-        return Err(UrlValidationError::UnsupportedScheme(scheme));
-    }
-
-    // Basic domain check
-    let after_scheme = if lower.starts_with("https://") {
-        &trimmed[8..]
-    } else {
-        &trimmed[7..]
-    };
-
-    let domain_part = after_scheme.split('/').next().unwrap_or("");
-    if domain_part.is_empty() || domain_part.contains(' ') {
-        return Err(UrlValidationError::MalformedUrl(
-            "Missing or invalid domain name".to_string(),
+    let parsed =
+        Url::parse(trimmed).map_err(|error| UrlValidationError::MalformedUrl(error.to_string()))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(UrlValidationError::UnsupportedScheme(
+            parsed.scheme().to_string(),
         ));
     }
 
-    let host = domain_part.split(':').next().unwrap_or("").to_lowercase();
-    if host == "localhost"
-        || host == "127.0.0.1"
-        || host == "::1"
-        || host.starts_with("192.168.")
-        || host.starts_with("10.")
-        || (host.starts_with("172.") && {
-            if let Some(second) = host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()) {
-                (16..=31).contains(&second)
-            } else {
-                false
+    let host = parsed
+        .host()
+        .ok_or_else(|| UrlValidationError::MalformedUrl("missing host".to_string()))?;
+    match host {
+        Host::Domain(domain) => {
+            let normalized = domain.trim_end_matches('.').to_ascii_lowercase();
+            if normalized == "localhost" || normalized.ends_with(".localhost") {
+                return Err(UrlValidationError::ProhibitedHost);
             }
-        })
-    {
-        return Err(UrlValidationError::ProhibitedHost);
+        }
+        Host::Ipv4(ip) => {
+            if is_prohibited_ip(IpAddr::V4(ip)) {
+                return Err(UrlValidationError::ProhibitedHost);
+            }
+        }
+        Host::Ipv6(ip) => {
+            if is_prohibited_ip(IpAddr::V6(ip)) {
+                return Err(UrlValidationError::ProhibitedHost);
+            }
+        }
     }
 
-    Ok(trimmed.to_string())
+    Ok(parsed)
+}
+
+pub fn validate_media_url(raw_url: &str) -> Result<String, UrlValidationError> {
+    parsed_public_url(raw_url).map(|_| raw_url.trim().to_string())
+}
+
+/// Rechecks DNS immediately before external access. Every answer must be public.
+pub async fn validate_media_url_network(raw_url: &str) -> Result<String, UrlValidationError> {
+    let parsed = parsed_public_url(raw_url)?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| UrlValidationError::MalformedUrl("missing host".to_string()))?;
+
+    if host.parse::<IpAddr>().is_err() {
+        let port = parsed.port_or_known_default().ok_or_else(|| {
+            UrlValidationError::MalformedUrl("URL has no resolvable port".to_string())
+        })?;
+        let addresses = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|error| UrlValidationError::HostResolutionFailed(error.to_string()))?;
+        let mut found = false;
+        for address in addresses {
+            found = true;
+            if is_prohibited_ip(address.ip()) {
+                return Err(UrlValidationError::ProhibitedHost);
+            }
+        }
+        if !found {
+            return Err(UrlValidationError::HostResolutionFailed(
+                "host returned no addresses".to_string(),
+            ));
+        }
+    }
+
+    Ok(raw_url.trim().to_string())
 }
 
 pub use validate_media_url as validate_url;
@@ -107,10 +155,6 @@ mod tests {
             validate_media_url("ftp://server.com/file.mp4"),
             Err(UrlValidationError::UnsupportedScheme("ftp".to_string()))
         );
-        assert_eq!(
-            validate_media_url("gopher://server.com"),
-            Err(UrlValidationError::UnsupportedScheme("gopher".to_string()))
-        );
     }
 
     #[test]
@@ -122,6 +166,39 @@ mod tests {
         assert_eq!(
             validate_media_url("https://youtube.com/watch\nbad"),
             Err(UrlValidationError::InvalidCharacters)
+        );
+    }
+
+    #[test]
+    fn test_rejects_private_ipv4_and_ipv6_literals() {
+        for url in [
+            "http://127.0.0.1/video",
+            "http://10.0.0.1/video",
+            "http://172.16.1.2/video",
+            "http://192.168.1.2/video",
+            "http://169.254.10.20/video",
+            "http://[::1]/video",
+            "http://[fc00::1]/video",
+            "http://[fe80::1]/video",
+            "http://[::ffff:127.0.0.1]/video",
+        ] {
+            assert_eq!(
+                validate_media_url(url),
+                Err(UrlValidationError::ProhibitedHost),
+                "{url} should be blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rejects_localhost_names() {
+        assert_eq!(
+            validate_media_url("http://localhost/video"),
+            Err(UrlValidationError::ProhibitedHost)
+        );
+        assert_eq!(
+            validate_media_url("http://service.localhost/video"),
+            Err(UrlValidationError::ProhibitedHost)
         );
     }
 }

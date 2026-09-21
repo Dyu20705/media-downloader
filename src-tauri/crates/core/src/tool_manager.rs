@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::process::Command;
 
 use crate::diagnostics::DiagnosticsBuffer;
@@ -108,12 +109,73 @@ pub fn get_pinned_tool_spec(name: &str) -> Option<&'static PinnedToolSpec> {
         .find(|t| t.name.eq_ignore_ascii_case(name))
 }
 
+const TOOL_VALIDATION_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_TOOL_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
+
+fn platform_artifact(spec: &PinnedToolSpec) -> (&'static str, &'static str) {
+    if cfg!(windows) {
+        (spec.windows_url, spec.windows_sha256)
+    } else if cfg!(target_os = "macos") {
+        (spec.darwin_url, spec.darwin_sha256)
+    } else {
+        (spec.linux_url, spec.linux_sha256)
+    }
+}
+
+fn parse_date_version(value: &str) -> Option<(u32, u32, u32)> {
+    value.split_whitespace().find_map(|token| {
+        let token =
+            token.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
+        let mut parts = token.split('.');
+        let year = parts.next()?.parse().ok()?;
+        let month = parts.next()?.parse().ok()?;
+        let day = parts.next()?.parse().ok()?;
+        if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return None;
+        }
+        Some((year, month, day))
+    })
+}
+
+fn is_date_version_older(version: &str, pinned_version: &str) -> bool {
+    match (
+        parse_date_version(version),
+        parse_date_version(pinned_version),
+    ) {
+        (Some(actual), Some(pinned)) => actual < pinned,
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedExecutable {
     pub name: String,
     pub path: PathBuf,
     pub version: Option<String>,
     pub is_managed: bool,
+}
+
+fn invalid_tool_status(
+    spec: &PinnedToolSpec,
+    source_url: &str,
+    tool: ResolvedExecutable,
+    sha256: Option<String>,
+    message: String,
+) -> ToolStatusInfo {
+    ToolStatusInfo {
+        name: spec.name.to_string(),
+        status: ToolStatus::Invalid,
+        version: tool.version,
+        pinned_version: spec.pinned_version.to_string(),
+        path: Some(tool.path.to_string_lossy().to_string()),
+        managed: true,
+        source_url: Some(source_url.to_string()),
+        sha256,
+        error_message: Some(message),
+        license: spec.license.to_string(),
+        license_url: spec.license_url.to_string(),
+        is_required: spec.is_required,
+    }
 }
 
 #[derive(Debug)]
@@ -189,10 +251,8 @@ impl ToolManager {
         fs::create_dir_all(tools_dir).map_err(|e| format!("Failed to create tools dir: {}", e))?;
 
         let manifest_path = self.get_manifest_path();
-        let tmp_path = tools_dir.join(format!(
-            "manifest.{}.tmp",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
-        ));
+        let nonce = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let tmp_path = tools_dir.join(format!("manifest.{nonce}.tmp"));
 
         let json_data = serde_json::to_string_pretty(manifest)
             .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
@@ -200,8 +260,34 @@ impl ToolManager {
         fs::write(&tmp_path, json_data)
             .map_err(|e| format!("Failed to write manifest temp file: {}", e))?;
 
-        fs::rename(&tmp_path, &manifest_path)
-            .map_err(|e| format!("Failed to atomically commit manifest: {}", e))?;
+        #[cfg(not(windows))]
+        {
+            fs::rename(&tmp_path, &manifest_path)
+                .map_err(|e| format!("Failed to atomically commit manifest: {}", e))?;
+        }
+
+        #[cfg(windows)]
+        {
+            let backup_path = tools_dir.join(format!("manifest.{nonce}.bak"));
+            let had_manifest = manifest_path.exists();
+
+            if had_manifest {
+                fs::rename(&manifest_path, &backup_path)
+                    .map_err(|e| format!("Failed to stage previous manifest: {}", e))?;
+            }
+
+            if let Err(error) = fs::rename(&tmp_path, &manifest_path) {
+                if had_manifest {
+                    let _ = fs::rename(&backup_path, &manifest_path);
+                }
+                let _ = fs::remove_file(&tmp_path);
+                return Err(format!("Failed to commit replacement manifest: {}", error));
+            }
+
+            if had_manifest {
+                let _ = fs::remove_file(&backup_path);
+            }
+        }
 
         Ok(())
     }
@@ -235,21 +321,11 @@ impl ToolManager {
 
     /// Validate executable by invoking its version argument
     pub async fn validate_executable(tool_name: &str, path: &Path) -> Result<String, String> {
-        if !path.exists() {
-            return Err(format!("Executable does not exist at {:?}", path));
-        }
-
-        // Ensure executable permissions on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(metadata) = fs::metadata(path) {
-                let mut perms = metadata.permissions();
-                if perms.mode() & 0o111 == 0 {
-                    perms.set_mode(perms.mode() | 0o755);
-                    let _ = fs::set_permissions(path, perms);
-                }
-            }
+        if !path.exists() || !path.is_file() {
+            return Err(format!(
+                "Executable does not exist or is not a regular file: {:?}",
+                path
+            ));
         }
 
         let version_arg = match tool_name.to_lowercase().as_str() {
@@ -260,10 +336,16 @@ impl ToolManager {
             _ => "--version",
         };
 
-        let output = Command::new(path)
-            .arg(version_arg)
-            .output()
+        let mut command = Command::new(path);
+        command.arg(version_arg);
+        let output = tokio::time::timeout(TOOL_VALIDATION_TIMEOUT, command.output())
             .await
+            .map_err(|_| {
+                format!(
+                    "Executable validation timed out after {} seconds",
+                    TOOL_VALIDATION_TIMEOUT.as_secs()
+                )
+            })?
             .map_err(|e| format!("Failed to spawn executable validation: {}", e))?;
 
         if !output.status.success() {
@@ -294,21 +376,7 @@ impl ToolManager {
         tool_name: &str,
         settings: Option<&AppSettings>,
     ) -> Option<ResolvedExecutable> {
-        // Check lifetime resolution cache
-        if let Ok(cache) = self.resolution_cache.read() {
-            if let Some(tool) = cache.get(tool_name) {
-                if tool.path.exists() {
-                    return Some(ResolvedExecutable {
-                        name: tool.name.clone(),
-                        path: tool.path.clone(),
-                        version: tool.version.clone(),
-                        is_managed: tool.is_managed,
-                    });
-                }
-            }
-        }
-
-        // Priority 1: Explicit configured path from settings
+        // An explicit configured path always outranks a cached resolution.
         if let Some(settings) = settings {
             let custom_path = match tool_name {
                 "yt-dlp" => settings.custom_ytdlp_path.as_deref(),
@@ -331,6 +399,21 @@ impl ToolManager {
                         self.cache_resolution(tool_name, &res);
                         return Some(res);
                     }
+                }
+                return None;
+            }
+        }
+
+        // Check lifetime resolution cache
+        if let Ok(cache) = self.resolution_cache.read() {
+            if let Some(tool) = cache.get(tool_name) {
+                if tool.path.exists() {
+                    return Some(ResolvedExecutable {
+                        name: tool.name.clone(),
+                        path: tool.path.clone(),
+                        version: tool.version.clone(),
+                        is_managed: tool.is_managed,
+                    });
                 }
             }
         }
@@ -509,57 +592,45 @@ impl ToolManager {
 
         let resolved = self.resolve_tool(tool_name, settings).await;
 
-        let source_url = if cfg!(windows) {
-            spec.windows_url
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_url
-        } else {
-            spec.linux_url
-        };
-
-        let expected_sha256 = if cfg!(windows) {
-            spec.windows_sha256
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_sha256
-        } else {
-            spec.linux_sha256
-        };
+        let (source_url, expected_sha256) = platform_artifact(spec);
 
         match resolved {
             Some(tool) => {
                 // If it is managed, verify checksum or executable integrity
                 if tool.is_managed {
-                    if let Ok(actual_sha) = Self::compute_sha256(&tool.path) {
-                        let manifest = self.load_manifest();
-                        let is_manifest_match = manifest
-                            .tools
-                            .get(tool_name)
-                            .map(|entry| entry.sha256.eq_ignore_ascii_case(&actual_sha))
-                            .unwrap_or(false);
-
-                        // If file is directly pinned binary and does not match expected nor manifest
-                        if !spec.is_archive
-                            && !actual_sha.eq_ignore_ascii_case(expected_sha256)
-                            && !is_manifest_match
-                        {
-                            return ToolStatusInfo {
-                                name: tool_name.to_string(),
-                                status: ToolStatus::Invalid,
-                                version: tool.version,
-                                pinned_version: spec.pinned_version.to_string(),
-                                path: Some(tool.path.to_string_lossy().to_string()),
-                                managed: true,
-                                source_url: Some(source_url.to_string()),
-                                sha256: Some(actual_sha),
-                                error_message: Some(
-                                    "Binary checksum mismatch. Reinstallation recommended."
-                                        .to_string(),
-                                ),
-                                license: spec.license.to_string(),
-                                license_url: spec.license_url.to_string(),
-                                is_required: spec.is_required,
-                            };
+                    let actual_sha = match Self::compute_sha256(&tool.path) {
+                        Ok(hash) => hash,
+                        Err(error) => {
+                            return invalid_tool_status(
+                                spec,
+                                source_url,
+                                tool,
+                                None,
+                                format!("Could not verify managed binary checksum: {error}"),
+                            );
                         }
+                    };
+                    let manifest = self.load_manifest();
+                    let is_manifest_match = manifest.tools.get(tool_name).is_some_and(|entry| {
+                        entry.verified
+                            && entry.path == tool.path.to_string_lossy()
+                            && entry.sha256.eq_ignore_ascii_case(&actual_sha)
+                    });
+                    let is_valid = if spec.is_archive {
+                        is_manifest_match
+                    } else {
+                        actual_sha.eq_ignore_ascii_case(expected_sha256) || is_manifest_match
+                    };
+
+                    if !is_valid {
+                        return invalid_tool_status(
+                            spec,
+                            source_url,
+                            tool,
+                            Some(actual_sha),
+                            "Managed binary checksum does not match its trusted installation record. Reinstallation required."
+                                .to_string(),
+                        );
                     }
 
                     ToolStatusInfo {
@@ -570,7 +641,7 @@ impl ToolManager {
                         path: Some(tool.path.to_string_lossy().to_string()),
                         managed: true,
                         source_url: Some(source_url.to_string()),
-                        sha256: Some(expected_sha256.to_string()),
+                        sha256: Some(actual_sha),
                         error_message: None,
                         license: spec.license.to_string(),
                         license_url: spec.license_url.to_string(),
@@ -580,7 +651,18 @@ impl ToolManager {
                     // Check if a managed directory or manifest entry exists but failed validation
                     let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
                     let manifest = self.load_manifest();
-                    if version_dir.exists() || manifest.tools.contains_key(tool_name) {
+                    let is_explicit_configuration = settings
+                        .and_then(|settings| match tool_name {
+                            "yt-dlp" => settings.custom_ytdlp_path.as_deref(),
+                            "ffmpeg" => settings.custom_ffmpeg_path.as_deref(),
+                            "ffprobe" => settings.custom_ffprobe_path.as_deref(),
+                            "mediainfo" => settings.custom_mediainfo_path.as_deref(),
+                            _ => None,
+                        })
+                        .is_some_and(|path| Path::new(path) == tool.path);
+                    if !is_explicit_configuration
+                        && (version_dir.exists() || manifest.tools.contains_key(tool_name))
+                    {
                         return ToolStatusInfo {
                             name: tool_name.to_string(),
                             status: ToolStatus::Invalid,
@@ -599,23 +681,10 @@ impl ToolManager {
 
                     // Non-managed (System PATH or unmanaged fallback)
                     // If the tool executable passed validation, it is operational.
-                    // Only flag yt-dlp as outdated if it is a known legacy build (< 2024.08)
                     let is_outdated = if tool_name == "yt-dlp" {
-                        match &tool.version {
-                            Some(v) => {
-                                let trimmed = v.trim();
-                                trimmed.starts_with("2021.")
-                                    || trimmed.starts_with("2022.")
-                                    || trimmed.starts_with("2023.")
-                                    || (trimmed.starts_with("2024.")
-                                        && !trimmed.starts_with("2024.08")
-                                        && !trimmed.starts_with("2024.09")
-                                        && !trimmed.starts_with("2024.10")
-                                        && !trimmed.starts_with("2024.11")
-                                        && !trimmed.starts_with("2024.12"))
-                            }
-                            None => false,
-                        }
+                        tool.version.as_deref().is_some_and(|version| {
+                            is_date_version_older(version, spec.pinned_version)
+                        })
                     } else {
                         false
                     };
@@ -712,8 +781,11 @@ impl ToolManager {
     }
 
     /// Backward-compatible health report
-    pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
-        let statuses = self.get_all_tool_statuses(None).await;
+    pub async fn get_all_tools_health_with_settings(
+        &self,
+        settings: Option<&AppSettings>,
+    ) -> Vec<ToolHealth> {
+        let statuses = self.get_all_tool_statuses(settings).await;
         statuses
             .into_iter()
             .map(|s| {
@@ -735,6 +807,10 @@ impl ToolManager {
             .collect()
     }
 
+    pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
+        self.get_all_tools_health_with_settings(None).await
+    }
+
     /// Install tool atomically:
     /// 1. Download to temporary file in staging directory
     /// 2. Verify SHA-256
@@ -753,21 +829,7 @@ impl ToolManager {
             &format!("Starting atomic installation for {}", tool_name),
         );
 
-        let source_url = if cfg!(windows) {
-            spec.windows_url
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_url
-        } else {
-            spec.linux_url
-        };
-
-        let expected_sha256 = if cfg!(windows) {
-            spec.windows_sha256
-        } else if cfg!(target_os = "macos") {
-            spec.darwin_sha256
-        } else {
-            spec.linux_sha256
-        };
+        let (source_url, expected_sha256) = platform_artifact(spec);
 
         let staging_dir = self.get_staging_dir();
         fs::create_dir_all(&staging_dir)
@@ -794,7 +856,7 @@ impl ToolManager {
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-        let response = client
+        let mut response = client
             .get(source_url)
             .send()
             .await
@@ -807,10 +869,39 @@ impl ToolManager {
             ));
         }
 
-        let bytes = response
-            .bytes()
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_TOOL_DOWNLOAD_BYTES)
+        {
+            return Err(format!(
+                "Tool archive exceeds the {} MiB download limit",
+                MAX_TOOL_DOWNLOAD_BYTES / (1024 * 1024)
+            ));
+        }
+
+        let capacity = response
+            .content_length()
+            .unwrap_or(0)
+            .min(MAX_TOOL_DOWNLOAD_BYTES) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|e| format!("Failed to read response stream: {}", e))?;
+            .map_err(|e| format!("Failed to read response stream: {}", e))?
+        {
+            let next_len = bytes
+                .len()
+                .checked_add(chunk.len())
+                .ok_or_else(|| "Tool download size overflow".to_string())?;
+            if next_len > MAX_TOOL_DOWNLOAD_BYTES as usize {
+                return Err(format!(
+                    "Tool archive exceeds the {} MiB download limit",
+                    MAX_TOOL_DOWNLOAD_BYTES / (1024 * 1024)
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
 
         fs::write(&tmp_file_path, &bytes)
             .map_err(|e| format!("Failed to write staging file: {}", e))?;
@@ -1086,14 +1177,7 @@ impl ToolManager {
             pinned_version: spec.pinned_version.to_string(),
             path: Some(final_destination.to_string_lossy().to_string()),
             managed: true,
-            source_url: Some(
-                if cfg!(windows) {
-                    spec.windows_url
-                } else {
-                    spec.linux_url
-                }
-                .to_string(),
-            ),
+            source_url: Some(platform_artifact(spec).0.to_string()),
             sha256: Some(bin_sha),
             error_message: None,
             license: spec.license.to_string(),
@@ -1172,5 +1256,18 @@ impl ToolManager {
             "Checking and auto-bootstrapping required engine tools",
         );
         self.install_all_missing().await
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn date_versions_are_compared_to_the_pin() {
+        assert!(is_date_version_older("2024.12.31", "2025.02.19"));
+        assert!(!is_date_version_older("2025.02.19", "2025.02.19"));
+        assert!(!is_date_version_older("stable 2026.01.02", "2025.02.19"));
+        assert!(!is_date_version_older("unknown", "2025.02.19"));
     }
 }

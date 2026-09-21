@@ -9,6 +9,8 @@ pub enum PathValidationError {
     InvalidCharacters,
     #[error("Directory path cannot be resolved or created: {0}")]
     DirectoryCreationFailed(String),
+    #[error("Output path exists but is not a directory")]
+    NotDirectory,
 }
 
 pub fn validate_and_ensure_directory(raw_dir: &str) -> Result<PathBuf, PathValidationError> {
@@ -22,6 +24,10 @@ pub fn validate_and_ensure_directory(raw_dir: &str) -> Result<PathBuf, PathValid
     }
 
     let path = PathBuf::from(trimmed);
+
+    if path.exists() && !path.is_dir() {
+        return Err(PathValidationError::NotDirectory);
+    }
 
     // If directory does not exist, attempt to create it
     if !path.exists() {
@@ -78,5 +84,17 @@ mod tests {
         let long_title = "a".repeat(300);
         let cleaned = sanitize_file_name(&long_title, 100);
         assert_eq!(cleaned.len(), 100);
+    }
+
+    #[test]
+    fn test_rejects_existing_file_as_output_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("not-a-directory");
+        std::fs::write(&file, b"data").unwrap();
+
+        assert_eq!(
+            validate_and_ensure_directory(&file.to_string_lossy()),
+            Err(PathValidationError::NotDirectory)
+        );
     }
 }

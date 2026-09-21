@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   DownloadJob,
@@ -38,6 +39,15 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
   const verification = job.verification;
   const fingerprint = job.fingerprint;
   const recipe = job.recipe;
+  const isVerified = verification?.isValid === true;
+  const verificationChecks = [
+    ['File Output Exists', verification?.checklist.fileExists === true],
+    ['File Size Valid', verification?.checklist.fileSizeValid === true],
+    ['Duration Detected', verification?.checklist.durationValid === true],
+    ['Video Stream Valid', verification?.checklist.videoStreamValid === true],
+    ['Audio Stream Valid', verification?.checklist.audioStreamValid === true],
+    ['Container Valid', verification?.checklist.containerValid === true],
+  ] as const;
 
   const handleCopyRecipe = () => {
     if (recipe) {
@@ -55,16 +65,16 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
       {/* Header Banner */}
       <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-4">
         <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-            <FileCheck2 className="w-5 h-5" />
+          <div className={`p-2 rounded-xl border ${isVerified ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
+            {isVerified ? <FileCheck2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-                Verified Acquisition
+              <span className={`text-xs font-semibold uppercase tracking-wider ${isVerified ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {isVerified ? 'Verified Acquisition' : 'Verification Incomplete'}
               </span>
-              <span className="px-2 py-0.5 text-[10px] font-mono bg-emerald-500/15 text-emerald-300 rounded border border-emerald-500/30">
-                100% Passed
+              <span className={`px-2 py-0.5 text-[10px] font-mono rounded border ${isVerified ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'}`}>
+                {verification?.verificationLevel?.replaceAll('_', ' ') || 'UNVERIFIED'}
               </span>
             </div>
             <h3 className="text-base font-bold text-white tracking-tight mt-0.5">
@@ -108,30 +118,16 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
           <span>Integrity Verification Checklist</span>
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-xs text-slate-300">File Output Exists</span>
-          </div>
-          <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-xs text-slate-300">File Size Non-Zero</span>
-          </div>
-          <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-xs text-slate-300">Stream Codecs Valid</span>
-          </div>
-          <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-xs text-slate-300">Duration Matched</span>
-          </div>
-          <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-xs text-slate-300">Container Encapsulation</span>
-          </div>
-          <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-xs text-slate-300">Zero Corruption</span>
-          </div>
+          {verificationChecks.map(([label, passed]) => (
+            <div key={label} className="flex items-center space-x-2 p-2 rounded-xl bg-slate-950/40 border border-slate-800/80">
+              {passed ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              )}
+              <span className="text-xs text-slate-300">{label}</span>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -3,7 +3,7 @@ use crate::types::{
     FormatRecommendation, MediaChapter, MediaFormatSpec, MediaKind, MediaMetadata, PresetType,
     SubtitleTrack, TranscodingCost,
 };
-use crate::url_validator::validate_media_url;
+use crate::url_validator::validate_media_url_network;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::process::Command;
@@ -12,7 +12,9 @@ pub async fn analyze_media_metadata(
     url: &str,
     tool_resolver: &Arc<ToolResolver>,
 ) -> Result<MediaMetadata, String> {
-    let valid_url = validate_media_url(url).map_err(|e| e.to_string())?;
+    let valid_url = validate_media_url_network(url)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let ytdlp_tool = tool_resolver
         .resolve_tool("yt-dlp")

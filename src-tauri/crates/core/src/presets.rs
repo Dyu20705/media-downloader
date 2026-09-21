@@ -1,3 +1,4 @@
+use crate::progress_parser::FINAL_PATH_PREFIX;
 use crate::types::{AppSettings, PresetType};
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,8 @@ pub fn compile_download_args(
     args.push("--newline".to_string());
     args.push("--progress".to_string());
     args.push("--no-warnings".to_string());
+    args.push("--print".to_string());
+    args.push(format!("after_move:{}%(filepath)s", FINAL_PATH_PREFIX));
 
     // Performance contract: 1 concurrent fragment to prevent stalls
     let fragments = if settings.concurrent_fragments > 0 {
@@ -202,6 +205,11 @@ mod tests {
             "mp4"
         ));
         assert!(!compiled.is_audio_only);
+        assert!(has_arg_pair(
+            &compiled.arguments,
+            "--print",
+            "after_move:__OCMD_FINAL_PATH__%(filepath)s"
+        ));
     }
 
     #[test]

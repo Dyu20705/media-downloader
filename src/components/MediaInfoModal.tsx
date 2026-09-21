@@ -349,7 +349,7 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   <div>
                     <span className="text-zinc-500 block">Target Container:</span>
                     <span className="font-semibold text-zinc-200 uppercase">
-                      {job?.recipe?.outputContainer || job?.inspection?.containerFormat || 'MP4'}
+                      {job?.recipe?.outputContainer || job?.inspection?.containerFormat || 'Unknown'}
                     </span>
                   </div>
                 </div>
@@ -373,32 +373,32 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
               {job?.verification && (
                 <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-2">
                   <div className="text-zinc-200 uppercase tracking-wider text-[11px] font-semibold flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
-                    <span>Media Verification Checks</span>
+                    <ShieldCheck className={`w-3.5 h-3.5 ${job.verification.isValid ? 'text-emerald-400' : 'text-amber-400'}`} aria-hidden="true" />
+                    <span>Media Verification Checks · {job.verification.verificationLevel.replaceAll('_', ' ')}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between">
                       <span className="text-zinc-400">Integrity:</span>
-                      <span className="font-semibold text-emerald-400">
-                        {job.verification.checklist?.fileSizeValid ? 'Passed' : 'Verified'}
+                      <span className={`font-semibold ${job.verification.checklist.fileSizeValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {job.verification.checklist.fileSizeValid ? 'Passed' : 'Failed'}
                       </span>
                     </div>
                     <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between">
                       <span className="text-zinc-400">Container Structure:</span>
-                      <span className="font-semibold text-emerald-400">
-                        {job.verification.checklist?.containerValid ? 'Valid' : 'Verified'}
+                      <span className={`font-semibold ${job.verification.checklist.containerValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {job.verification.checklist.containerValid ? 'Valid' : 'Unknown'}
                       </span>
                     </div>
                     <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between">
                       <span className="text-zinc-400">Audio Playable:</span>
-                      <span className="font-semibold text-emerald-400">
-                        {job.verification.checklist?.audioStreamValid ? 'Confirmed' : 'Valid'}
+                      <span className={`font-semibold ${job.verification.checklist.audioStreamValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {job.verification.checklist.audioStreamValid ? 'Confirmed' : 'Unconfirmed'}
                       </span>
                     </div>
                     <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-between">
                       <span className="text-zinc-400">Video Playable:</span>
-                      <span className="font-semibold text-emerald-400">
-                        {job.verification.checklist?.videoStreamValid ? 'Confirmed' : 'Valid'}
+                      <span className={`font-semibold ${job.verification.checklist.videoStreamValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {job.verification.checklist.videoStreamValid ? 'Confirmed' : 'Unconfirmed'}
                       </span>
                     </div>
                   </div>
@@ -431,7 +431,7 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   <div>
                     <span className="text-zinc-500 block">Video Codec:</span>
                     <span className="font-semibold text-zinc-200">
-                      {inspection?.videoCodec || primaryFormat?.vcodec || 'None / Audio Only'}
+                      {inspection?.videoCodec || (job ? 'Unknown' : primaryFormat?.vcodec || 'Unknown')}
                     </span>
                   </div>
                   {inspection?.videoProfile && (
@@ -445,7 +445,7 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                     <span className="font-semibold text-zinc-200">
                       {inspection?.width && inspection?.height
                         ? `${inspection.width} x ${inspection.height}`
-                        : metadata?.availableResolutions?.[0]
+                        : !job && metadata?.availableResolutions?.[0]
                         ? `${metadata.availableResolutions[0]}p Max`
                         : 'N/A'}
                     </span>
@@ -453,13 +453,13 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   <div>
                     <span className="text-zinc-500 block">Frame Rate:</span>
                     <span className="font-medium text-zinc-200">
-                      {inspection?.fps ? `${inspection.fps} fps` : metadata?.availableFrameRates?.[0] ? `${metadata.availableFrameRates[0]} fps` : 'N/A'}
+                      {inspection?.fps ? `${inspection.fps} fps` : !job && metadata?.availableFrameRates?.[0] ? `${metadata.availableFrameRates[0]} fps` : 'Unknown'}
                     </span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block">Dynamic Range:</span>
                     <span className={`font-semibold ${metadata?.isHdr || inspection?.isHdr ? 'text-amber-400' : 'text-zinc-200'}`}>
-                      {metadata?.isHdr || inspection?.isHdr ? 'HDR (High Dynamic Range)' : 'SDR (Standard)'}
+                      {inspection?.isHdr === true ? 'HDR (High Dynamic Range)' : inspection?.isHdr === false ? 'SDR (Standard)' : job ? 'Unknown' : metadata?.isHdr ? 'HDR (Source)' : 'Unknown'}
                     </span>
                   </div>
                   {inspection?.bitDepth && (
@@ -515,25 +515,25 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   <div>
                     <span className="text-zinc-500 block">Audio Codec:</span>
                     <span className="font-semibold text-zinc-200">
-                      {inspection?.audioCodec || primaryFormat?.acodec || (job?.preset === 'mp3' ? 'MP3' : job?.preset === 'flac' ? 'FLAC' : 'AAC / Opus')}
+                      {inspection?.audioCodec || (job ? 'Unknown' : primaryFormat?.acodec || 'Unknown')}
                     </span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block">Channels:</span>
                     <span className="font-medium text-zinc-200">
-                      {inspection?.audioChannels ? `${inspection.audioChannels} Channels (${inspection.audioChannels === 2 ? 'Stereo' : 'Mono'})` : '2 Channels (Stereo)'}
+                      {inspection?.audioChannels ? `${inspection.audioChannels} Channels${inspection.audioChannels === 2 ? ' (Stereo)' : ''}` : 'Unknown'}
                     </span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block">Sample Rate:</span>
                     <span className="font-medium text-zinc-200">
-                      {inspection?.audioSampleRateHz ? `${(inspection.audioSampleRateHz / 1000).toFixed(1)} kHz` : '48.0 kHz'}
+                      {inspection?.audioSampleRateHz ? `${(inspection.audioSampleRateHz / 1000).toFixed(1)} kHz` : 'Unknown'}
                     </span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block">Bitrate:</span>
                     <span className="font-medium text-zinc-200">
-                      {inspection?.audioBitrateKbps ? `${inspection.audioBitrateKbps} kbps` : primaryFormat?.abr ? `${Math.round(primaryFormat.abr)} kbps` : '160 - 320 kbps'}
+                      {inspection?.audioBitrateKbps ? `${inspection.audioBitrateKbps} kbps` : !job && primaryFormat?.abr ? `${Math.round(primaryFormat.abr)} kbps` : 'Unknown'}
                     </span>
                   </div>
                   {inspection?.audioLanguage && (
