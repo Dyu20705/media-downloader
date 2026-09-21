@@ -116,6 +116,12 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
             <span>Download failed</span>
           </div>
 
+          {activeJob.errorMessage && (
+            <p className="text-xs leading-relaxed text-red-200/90">
+              {activeJob.errorMessage}
+            </p>
+          )}
+
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
@@ -135,6 +141,16 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
             >
               <span>Details</span>
             </button>
+
+            {activeJob.inspection && (
+              <button
+                type="button"
+                onClick={() => onOpenDetails(activeJob)}
+                className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-xl border border-zinc-700 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+              >
+                Technical inspection
+              </button>
+            )}
           </div>
         </div>
       );

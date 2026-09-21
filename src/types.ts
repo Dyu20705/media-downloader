@@ -158,6 +158,7 @@ export interface DownloadProgress {
 }
 
 export interface MediaInspection {
+  verificationLevel: VerificationLevel;
   containerFormat: string;
   videoCodec?: string | null;
   videoProfile?: string | null;
@@ -179,6 +180,8 @@ export interface MediaInspection {
   streamCount?: number | null;
   chaptersCount?: number | null;
 }
+
+export type VerificationLevel = 'VERIFIED' | 'BASIC_INSPECTION' | 'UNVERIFIED';
 
 export interface SourceFingerprint {
   extractor: string;
@@ -235,6 +238,7 @@ export interface OutputMediaArtifact {
 
 export interface VerificationResult {
   isValid: boolean;
+  verificationLevel: VerificationLevel;
   checklist: VerificationChecklist;
   outputArtifact?: OutputMediaArtifact | null;
   fingerprint?: MediaFingerprint | null;
