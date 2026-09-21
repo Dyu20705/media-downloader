@@ -6,18 +6,29 @@ use tokio::time::timeout;
 use crate::analyzer::parse_ytdlp_json;
 use crate::tools::ToolResolver;
 use crate::types::{
-    DownloadStrategy, MediaCapabilities, MediaKind, MediaMetadata, MediaSourceType, PresetType,
-    ResolvedMediaSource, ResolverErrorCategory, ResolverErrorDetail, TranscodingCost,
+    AppSettings, DownloadStrategy, MediaCapabilities, MediaKind, MediaMetadata, MediaSourceType,
+    PresetType, ResolvedMediaSource, ResolverErrorCategory, ResolverErrorDetail, TranscodingCost,
 };
-use crate::url_validator::validate_media_url;
+use crate::url_validator::{validate_media_url, validate_media_url_network};
 
 pub struct UniversalResolver {
     tool_resolver: Arc<ToolResolver>,
+    settings: Option<AppSettings>,
 }
 
 impl UniversalResolver {
     pub fn new(tool_resolver: Arc<ToolResolver>) -> Self {
-        Self { tool_resolver }
+        Self {
+            tool_resolver,
+            settings: None,
+        }
+    }
+
+    pub fn with_settings(tool_resolver: Arc<ToolResolver>, settings: AppSettings) -> Self {
+        Self {
+            tool_resolver,
+            settings: Some(settings),
+        }
     }
 
     /// Primary entry point: Resolves any media URL into a structured ResolvedMediaSource
@@ -43,6 +54,33 @@ impl UniversalResolver {
                         category: ResolverErrorCategory::InvalidUrl,
                         technical_message: e.to_string(),
                         user_friendly_message: "The provided URL is not valid. Please ensure it begins with http:// or https:// and points to a valid address.".to_string(),
+                        http_status: None,
+                    }),
+                    is_resolved: false,
+                });
+            }
+        };
+
+        let validated_url = match validate_media_url_network(&validated_url).await {
+            Ok(url) => url,
+            Err(error) => {
+                return Ok(ResolvedMediaSource {
+                    source_type: MediaSourceType::Inaccessible,
+                    extractor: None,
+                    extractor_key: None,
+                    webpage_url: url.to_string(),
+                    title: "Inaccessible URL".to_string(),
+                    media_kind: MediaKind::Video,
+                    capabilities: MediaCapabilities::default(),
+                    candidates: Vec::new(),
+                    strategy: DownloadStrategy::DirectCopy,
+                    transcoding_cost: TranscodingCost::NoProcessing,
+                    transcoding_explanation: "URL host failed the network safety check".to_string(),
+                    metadata: None,
+                    error_detail: Some(ResolverErrorDetail {
+                        category: ResolverErrorCategory::NetworkUnreachable,
+                        technical_message: error.to_string(),
+                        user_friendly_message: "The source host could not be reached safely. Private and local network destinations are blocked.".to_string(),
                         http_status: None,
                     }),
                     is_resolved: false,
@@ -392,11 +430,14 @@ impl UniversalResolver {
 
     /// Executes yt-dlp metadata extraction with a non-blocking timeout
     async fn execute_ytdlp_extraction(&self, url: &str) -> Result<MediaMetadata, String> {
-        let ytdlp_tool = self
-            .tool_resolver
-            .resolve_tool("yt-dlp")
-            .await
-            .ok_or_else(|| "yt-dlp tool binary not available".to_string())?;
+        let ytdlp_tool = if let Some(settings) = self.settings.as_ref() {
+            self.tool_resolver
+                .resolve_tool_with_settings("yt-dlp", Some(settings))
+                .await
+        } else {
+            self.tool_resolver.resolve_tool("yt-dlp").await
+        }
+        .ok_or_else(|| "yt-dlp tool binary not available".to_string())?;
 
         let timeout_duration = Duration::from_secs(45);
 

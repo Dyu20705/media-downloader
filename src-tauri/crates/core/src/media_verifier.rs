@@ -1,17 +1,15 @@
-use crate::tools::ToolResolver;
 use crate::types::{
     DownloadJob, ExplainableResult, MediaInspection, MediaKind, OutputMediaArtifact, PresetType,
-    TranscodingCost, VerificationChecklist, VerificationResult,
+    TranscodingCost, VerificationChecklist, VerificationLevel, VerificationResult,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 pub async fn verify_and_inspect_media(
     file_path: &Path,
-    tool_resolver: &Arc<ToolResolver>,
+    ffprobe_path: Option<&Path>,
     is_lossy_transcode_warning: bool,
 ) -> Result<MediaInspection, String> {
     if !file_path.exists() {
@@ -29,21 +27,18 @@ pub async fn verify_and_inspect_media(
         ));
     }
 
-    // Try ffprobe first
-    if let Some(ffprobe_tool) = tool_resolver.resolve_tool("ffprobe").await {
-        if let Ok(inspection) = inspect_with_ffprobe(
-            &ffprobe_tool.path,
+    if let Some(ffprobe_path) = ffprobe_path {
+        return inspect_with_ffprobe(
+            ffprobe_path,
             file_path,
             file_size_bytes,
             is_lossy_transcode_warning,
         )
         .await
-        {
-            return Ok(inspection);
-        }
+        .map_err(|error| format!("Deep media verification failed: {error}"));
     }
 
-    // Fallback if ffprobe isn't present or errored
+    // Basic inspection is deliberately not equivalent to successful verification.
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
@@ -51,6 +46,7 @@ pub async fn verify_and_inspect_media(
         .to_lowercase();
 
     Ok(MediaInspection {
+        verification_level: VerificationLevel::BasicInspection,
         container_format: ext.to_uppercase(),
         video_codec: None,
         video_profile: None,
@@ -94,15 +90,17 @@ pub fn generate_verification_and_explanation(
 
     let file_exists = std::path::Path::new(file_path).exists();
     let file_size_valid = inspection.file_size_bytes > 1024;
-    let duration_valid = inspection.duration_seconds.map(|d| d > 0.0).unwrap_or(true);
-    let video_stream_valid = if is_audio_only {
+    let duration_valid = inspection.duration_seconds.is_some_and(|d| d > 0.0);
+    let expects_video = !is_audio_only && job.metadata.has_video;
+    let expects_audio = is_audio_only || job.metadata.has_audio;
+    let video_stream_valid = if !expects_video {
         true
     } else {
-        inspection.video_codec.is_some() || !inspection.container_format.is_empty()
+        inspection.video_codec.is_some()
     };
-    let audio_stream_valid =
-        inspection.audio_codec.is_some() || !inspection.container_format.is_empty();
-    let container_valid = !inspection.container_format.is_empty();
+    let audio_stream_valid = !expects_audio || inspection.audio_codec.is_some();
+    let container_valid = !inspection.container_format.is_empty()
+        && !inspection.container_format.eq_ignore_ascii_case("unknown");
 
     let mut notes = Vec::new();
     if file_size_valid {
@@ -136,7 +134,13 @@ pub fn generate_verification_and_explanation(
         notes,
     };
 
-    let is_valid = file_exists && file_size_valid && container_valid;
+    let is_valid = inspection.verification_level == VerificationLevel::Verified
+        && file_exists
+        && file_size_valid
+        && duration_valid
+        && video_stream_valid
+        && audio_stream_valid
+        && container_valid;
 
     let output_artifact = OutputMediaArtifact {
         artifact_path: file_path.to_string(),
@@ -157,7 +161,7 @@ pub fn generate_verification_and_explanation(
 
     // Construct specs label (e.g. "1080p60 H.264 + AAC" or "Audio · 320kbps MP3")
     let specs_label = if is_audio_only {
-        let codec = inspection.audio_codec.as_deref().unwrap_or("Audio");
+        let codec = inspection.audio_codec.as_deref().unwrap_or("unknown");
         let br = inspection
             .audio_bitrate_kbps
             .map(|b| format!(" · {}kbps", b))
@@ -169,17 +173,18 @@ pub fn generate_verification_and_explanation(
             br
         )
     } else {
-        let height = inspection.height.unwrap_or(1080);
-        let fps_str = inspection
+        let resolution = inspection
+            .height
+            .map(|height| format!("{height}p"))
+            .unwrap_or_else(|| "unknown resolution".to_string());
+        let fps = inspection
             .fps
-            .map(|f| format!("p{:.0}", f))
-            .unwrap_or_else(|| "p".to_string());
-        let vcodec = inspection.video_codec.as_deref().unwrap_or("H.264");
-        let acodec = inspection.audio_codec.as_deref().unwrap_or("AAC");
+            .map(|fps| format!("{fps:.0}fps "))
+            .unwrap_or_default();
+        let vcodec = inspection.video_codec.as_deref().unwrap_or("unknown video");
+        let acodec = inspection.audio_codec.as_deref().unwrap_or("unknown audio");
         format!(
-            "{}{} {} + {}",
-            height,
-            fps_str,
+            "{resolution} {fps}{} + {}",
             vcodec.to_uppercase(),
             acodec.to_uppercase()
         )
@@ -188,12 +193,17 @@ pub fn generate_verification_and_explanation(
     let why_reasons = if let Some(rec) = &job.metadata.smart_recommendation {
         rec.why_reasons.clone()
     } else {
-        vec![
+        let mut reasons = vec![
             "✓ matched requested quality target".to_string(),
             "✓ native stream container encapsulation".to_string(),
             "✓ no unnecessary generational transcoding".to_string(),
-            "✓ full stream integrity verified".to_string(),
-        ]
+        ];
+        reasons.push(if is_valid {
+            "✓ media streams verified with ffprobe".to_string()
+        } else {
+            "⚠ deep stream verification unavailable or failed".to_string()
+        });
+        reasons
     };
 
     let transcoding_cost = job
@@ -224,6 +234,7 @@ pub fn generate_verification_and_explanation(
 
     let verification_result = VerificationResult {
         is_valid,
+        verification_level: inspection.verification_level,
         checklist,
         output_artifact: Some(output_artifact),
         fingerprint: job.fingerprint.clone(),
@@ -251,7 +262,11 @@ async fn inspect_with_ffprobe(
         .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
 
     if !output.status.success() {
-        return Err("ffprobe exited with non-zero status".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "ffprobe exited with non-zero status: {}",
+            stderr.trim()
+        ));
     }
 
     let json_text = String::from_utf8_lossy(&output.stdout);
@@ -387,12 +402,17 @@ async fn inspect_with_ffprobe(
         }
     }
 
+    if stream_count == 0 || (video_codec.is_none() && audio_codec.is_none()) {
+        return Err("ffprobe found no playable audio or video streams".to_string());
+    }
+
     let chapters_count = root
         .get("chapters")
         .and_then(|c| c.as_array())
         .map(|arr| arr.len() as u32);
 
     Ok(MediaInspection {
+        verification_level: VerificationLevel::Verified,
         container_format,
         video_codec,
         video_profile,
@@ -450,4 +470,45 @@ pub fn resolve_final_download_path(output_dir: &Path, media_id: &str) -> Option<
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn missing_ffprobe_produces_basic_inspection_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let media = directory.path().join("candidate.mp4");
+        std::fs::write(&media, vec![0_u8; 2048]).unwrap();
+
+        let inspection = verify_and_inspect_media(&media, None, false).await.unwrap();
+        assert_eq!(
+            inspection.verification_level,
+            VerificationLevel::BasicInspection
+        );
+        assert!(inspection.video_codec.is_none());
+        assert!(inspection.audio_codec.is_none());
+        assert!(inspection.duration_seconds.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_ffprobe_does_not_fall_back_to_success() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let media = directory.path().join("truncated.mp4");
+        let probe = directory.path().join("ffprobe");
+        std::fs::write(&media, vec![0_u8; 2048]).unwrap();
+        std::fs::write(&probe, b"#!/bin/sh\necho 'corrupt input' >&2\nexit 1\n").unwrap();
+        let mut permissions = std::fs::metadata(&probe).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&probe, permissions).unwrap();
+
+        let result = verify_and_inspect_media(&media, Some(&probe), false).await;
+        assert!(result
+            .unwrap_err()
+            .contains("Deep media verification failed"));
+    }
 }

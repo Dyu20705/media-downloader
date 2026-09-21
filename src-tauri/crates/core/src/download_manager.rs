@@ -14,7 +14,7 @@ use crate::settings::SettingsManager;
 use crate::state_machine::DownloadStateMachine;
 use crate::tools::ToolResolver;
 use crate::types::{DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest};
-use crate::url_validator::validate_media_url;
+use crate::url_validator::validate_media_url_network;
 
 pub struct ActiveJobHandle {
     pub job_id: String,
@@ -27,6 +27,7 @@ pub struct DownloadManager {
     settings: Arc<SettingsManager>,
     active_job: Arc<RwLock<Option<DownloadJob>>>,
     active_handle: Arc<Mutex<Option<ActiveJobHandle>>>,
+    admission_lock: Arc<Mutex<()>>,
 }
 
 impl DownloadManager {
@@ -41,6 +42,7 @@ impl DownloadManager {
             settings,
             active_job: Arc::new(RwLock::new(None)),
             active_handle: Arc::new(Mutex::new(None)),
+            admission_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -52,7 +54,9 @@ impl DownloadManager {
         &self,
         request: StartDownloadRequest,
     ) -> Result<DownloadJob, String> {
-        // 1. Check concurrency lock (1 active job per performance contract)
+        // Admission, process spawn, and slot publication are one atomic operation.
+        let _admission_guard = self.admission_lock.lock().await;
+
         if let Some(existing) = self.get_active_job().await {
             if matches!(
                 existing.status,
@@ -69,18 +73,20 @@ impl DownloadManager {
         }
 
         // 2. Validate URL and Output Directory
-        let valid_url = validate_media_url(&request.url).map_err(|e| e.to_string())?;
+        let valid_url = validate_media_url_network(&request.url)
+            .await
+            .map_err(|e| e.to_string())?;
         let output_dir_path =
             validate_and_ensure_directory(&request.output_directory).map_err(|e| e.to_string())?;
 
         // 3. Resolve yt-dlp tool
+        let current_settings = self.settings.get_settings();
         let ytdlp_tool = self
             .tool_resolver
-            .resolve_tool("yt-dlp")
+            .resolve_tool_with_settings("yt-dlp", Some(&current_settings))
             .await
             .ok_or_else(|| "yt-dlp executable not found".to_string())?;
 
-        let current_settings = self.settings.get_settings();
         let compiled = compile_download_args(
             request.preset,
             &request.quality,
@@ -116,9 +122,6 @@ impl DownloadManager {
             explainable_result: None,
         };
 
-        // Store initial job in state
-        *self.active_job.write().await = Some(initial_job.clone());
-
         self.diagnostics.log(
             "INFO",
             "DOWNLOAD_MANAGER",
@@ -132,7 +135,11 @@ impl DownloadManager {
         let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
 
         let mut final_args = compiled.arguments.clone();
-        if let Some(ffmpeg_tool) = self.tool_resolver.resolve_tool("ffmpeg").await {
+        if let Some(ffmpeg_tool) = self
+            .tool_resolver
+            .resolve_tool_with_settings("ffmpeg", Some(&current_settings))
+            .await
+        {
             final_args.push("--ffmpeg-location".to_string());
             final_args.push(ffmpeg_tool.path.to_string_lossy().to_string());
         }
@@ -144,6 +151,9 @@ impl DownloadManager {
                 .inspect_err(|e| {
                     self.diagnostics.log("ERROR", "PROCESS", e);
                 })?;
+
+        // Publish the reserved slot only after the process was spawned successfully.
+        *self.active_job.write().await = Some(initial_job.clone());
 
         // Save active handle
         *self.active_handle.lock().await = Some(ActiveJobHandle {
@@ -158,6 +168,7 @@ impl DownloadManager {
         let active_handle_clone = self.active_handle.clone();
         let media_id = request.metadata.id.clone();
         let is_lossy_warning = compiled.is_lossy_conversion;
+        let verification_settings = current_settings.clone();
 
         tokio::spawn(async move {
             let mut state_machine = DownloadStateMachine::with_state(DownloadStatus::Downloading);
@@ -261,18 +272,19 @@ impl DownloadManager {
                                 .to_string();
 
                             // Run media inspection through ffprobe/mediainfo
+                            let ffprobe_tool = tool_resolver_clone
+                                .resolve_tool_with_settings("ffprobe", Some(&verification_settings))
+                                .await;
                             let inspection_result = verify_and_inspect_media(
                                 &resolved_file,
-                                &tool_resolver_clone,
+                                ffprobe_tool.as_ref().map(|tool| tool.path.as_path()),
                                 is_lossy_warning,
                             )
                             .await;
 
                             match inspection_result {
                                 Ok(inspection) => {
-                                    let _ = state_machine.transition(DownloadStatus::Completed);
                                     if let Some(ref mut job) = *active_job_clone.write().await {
-                                        job.status = DownloadStatus::Completed;
                                         job.final_file_name = Some(fname);
                                         job.final_file_path =
                                             Some(resolved_file.to_string_lossy().to_string());
@@ -303,11 +315,34 @@ impl DownloadManager {
                                             job.verification.as_ref().map(|v| v.checklist.clone()),
                                         );
                                         job.recipe = Some(recipe);
+
+                                        if job.verification.as_ref().is_some_and(|v| v.is_valid) {
+                                            let _ =
+                                                state_machine.transition(DownloadStatus::Completed);
+                                            job.status = DownloadStatus::Completed;
+                                        } else {
+                                            let _ =
+                                                state_machine.transition(DownloadStatus::Failed);
+                                            job.status = DownloadStatus::Failed;
+                                            job.error_message = Some(
+                                                "Deep media verification did not pass. The output was retained for inspection."
+                                                    .to_string(),
+                                            );
+                                        }
                                     }
+                                    let final_status = active_job_clone
+                                        .read()
+                                        .await
+                                        .as_ref()
+                                        .map(|job| job.status);
                                     diagnostics_clone.log(
-                                        "INFO",
+                                        if final_status == Some(DownloadStatus::Completed) { "INFO" } else { "ERROR" },
                                         "DOWNLOAD_MANAGER",
-                                        "Download, verification, fingerprinting, and recipe generation completed successfully.",
+                                        if final_status == Some(DownloadStatus::Completed) {
+                                            "Download, verification, fingerprinting, and recipe generation completed successfully."
+                                        } else {
+                                            "Download finished, but deep media verification did not pass."
+                                        },
                                     );
                                 }
                                 Err(verify_err) => {
@@ -351,22 +386,190 @@ impl DownloadManager {
     }
 
     pub async fn cancel_download(&self, job_id: &str) -> Result<DownloadJob, String> {
-        let handle_guard = self.active_handle.lock().await;
-        if let Some(handle) = handle_guard.as_ref() {
-            if handle.job_id == job_id {
-                let _ = handle.cancel_sender.send(()).await;
+        let cancellation_sent = {
+            let handle_guard = self.active_handle.lock().await;
+            if let Some(handle) = handle_guard.as_ref() {
+                handle.job_id == job_id && handle.cancel_sender.send(()).await.is_ok()
+            } else {
+                false
             }
+        };
+
+        if !cancellation_sent {
+            return Err(format!(
+                "No running download job found with ID '{}'",
+                job_id
+            ));
         }
 
         if let Some(mut job) = self.get_active_job().await {
             if job.id == job_id {
-                job.status = DownloadStatus::Cancelled;
-                job.completed_at = Some(Local::now().to_rfc3339());
+                job.status = DownloadStatus::Cancelling;
+                job.completed_at = None;
                 *self.active_job.write().await = Some(job.clone());
                 return Ok(job);
             }
         }
 
         Err(format!("No active download job found with ID '{}'", job_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool_manager::ToolManager;
+    use crate::types::{MediaKind, MediaMetadata, PresetType};
+
+    fn test_job() -> DownloadJob {
+        DownloadJob {
+            id: "job-cancel-test".to_string(),
+            url: "https://example.com/media".to_string(),
+            preset: PresetType::Mp4Compatible,
+            quality: "auto".to_string(),
+            output_directory: "/tmp".to_string(),
+            status: DownloadStatus::Downloading,
+            progress: DownloadProgress::default(),
+            metadata: MediaMetadata {
+                id: "media".to_string(),
+                title: "Media".to_string(),
+                uploader: None,
+                uploader_avatar: None,
+                channel_id: None,
+                uploader_url: None,
+                duration: Some(1.0),
+                thumbnail: None,
+                webpage_url: "https://example.com/media".to_string(),
+                media_kind: MediaKind::Video,
+                upload_date: None,
+                release_timestamp: None,
+                view_count: None,
+                like_count: None,
+                description: None,
+                categories: None,
+                tags: None,
+                language: None,
+                is_live: Some(false),
+                was_live: Some(false),
+                extractor: None,
+                extractor_key: None,
+                playlist_title: None,
+                playlist_index: None,
+                playlist_count: None,
+                available_resolutions: vec![],
+                available_frame_rates: vec![],
+                has_video: true,
+                has_audio: true,
+                is_hdr: None,
+                subtitles: None,
+                automatic_captions: None,
+                chapters: None,
+                formats: None,
+                smart_recommendation: None,
+                source_type: None,
+                strategy: None,
+                transcoding_cost: None,
+                transcoding_explanation: None,
+                capabilities: None,
+            },
+            final_file_name: None,
+            final_file_path: None,
+            inspection: None,
+            error_message: None,
+            created_at: "now".to_string(),
+            completed_at: None,
+            subtitle_options: None,
+            sponsor_block_mode: None,
+            intent: None,
+            recipe: None,
+            fingerprint: None,
+            explainable_result: None,
+            verification: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_reports_cancelling_until_worker_terminates_process() {
+        let manager = DownloadManager::new(
+            Arc::new(ToolResolver::new()),
+            Arc::new(DiagnosticsBuffer::new()),
+            Arc::new(SettingsManager::new()),
+        );
+        *manager.active_job.write().await = Some(test_job());
+        let (sender, mut receiver) = mpsc::channel(1);
+        *manager.active_handle.lock().await = Some(ActiveJobHandle {
+            job_id: "job-cancel-test".to_string(),
+            cancel_sender: sender,
+        });
+
+        let returned = manager.cancel_download("job-cancel-test").await.unwrap();
+        assert_eq!(returned.status, DownloadStatus::Cancelling);
+        assert!(returned.completed_at.is_none());
+        assert_eq!(receiver.recv().await, Some(()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn simultaneous_starts_reserve_only_one_download_slot() {
+        let tools_directory = tempfile::tempdir().unwrap();
+        let output_directory = tempfile::tempdir().unwrap();
+        let diagnostics = Arc::new(DiagnosticsBuffer::new());
+        let tool_manager = ToolManager::new(
+            Some(tools_directory.path().to_path_buf()),
+            diagnostics.clone(),
+        );
+        let fake_ytdlp = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2025.02.19; exit 0; fi\nsleep 5\nexit 1\n";
+        let source = tools_directory.path().join("source");
+        std::fs::write(&source, fake_ytdlp).unwrap();
+        let hash = ToolManager::compute_sha256(&source).unwrap();
+        tool_manager
+            .install_from_bytes("yt-dlp", fake_ytdlp, &hash, false)
+            .await
+            .unwrap();
+
+        let manager = Arc::new(DownloadManager::new(
+            Arc::new(ToolResolver::with_manager(tool_manager)),
+            diagnostics,
+            Arc::new(SettingsManager::new()),
+        ));
+        let request = StartDownloadRequest {
+            url: "http://93.184.216.34/media".to_string(),
+            metadata: test_job().metadata,
+            preset: PresetType::Mp4Compatible,
+            quality: "auto".to_string(),
+            output_directory: output_directory.path().to_string_lossy().to_string(),
+        };
+
+        let first_manager = manager.clone();
+        let first_request = request.clone();
+        let second_manager = manager.clone();
+        let (first, second) = tokio::join!(
+            async move { first_manager.start_download(first_request).await },
+            async move { second_manager.start_download(request).await }
+        );
+
+        let started = match (first, second) {
+            (Ok(started), Err(error)) | (Err(error), Ok(started)) => {
+                assert!(error.contains("A download is already in progress"));
+                started
+            }
+            results => panic!("expected exactly one admitted download, got {results:?}"),
+        };
+        let cancelled = manager.cancel_download(&started.id).await.unwrap();
+        assert_eq!(cancelled.status, DownloadStatus::Cancelling);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if manager
+                    .get_active_job()
+                    .await
+                    .is_some_and(|job| job.status == DownloadStatus::Cancelled)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }

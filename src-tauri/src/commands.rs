@@ -30,7 +30,10 @@ pub async fn resolve_media(
         "RESOLVER",
         &format!("Universal resolving URL: {}", url),
     );
-    let resolver = UniversalResolver::new(Arc::clone(&state.tool_resolver));
+    let resolver = UniversalResolver::with_settings(
+        Arc::clone(&state.tool_resolver),
+        state.settings.get_settings(),
+    );
     let result = resolver.resolve(&url).await?;
     state.diagnostics.log(
         "INFO",
@@ -51,7 +54,10 @@ pub async fn analyze_media(
     state
         .diagnostics
         .log("INFO", "IPC", &format!("Analyzing URL: {}", url));
-    let resolver = UniversalResolver::new(Arc::clone(&state.tool_resolver));
+    let resolver = UniversalResolver::with_settings(
+        Arc::clone(&state.tool_resolver),
+        state.settings.get_settings(),
+    );
     let resolved = resolver.resolve(&url).await?;
     if let Some(metadata) = resolved.metadata {
         Ok(metadata)
@@ -174,7 +180,9 @@ pub async fn save_settings(
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<AppSettings, String> {
-    state.settings.save_settings(settings)
+    let saved = state.settings.save_settings(settings)?;
+    state.tool_resolver.clear_cache();
+    Ok(saved)
 }
 
 #[tauri::command]

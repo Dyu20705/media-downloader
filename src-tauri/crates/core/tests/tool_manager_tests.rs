@@ -192,6 +192,86 @@ async fn test_resolution_order_priority() {
     let tool = resolved.unwrap();
     assert_eq!(tool.path, custom_exe_path);
     assert!(!tool.is_managed, "Explicit path is not managed");
+
+    let second_path = explicit_dir.path().join(if cfg!(windows) {
+        "custom_yt_second.exe"
+    } else {
+        "custom_yt_second"
+    });
+    if cfg!(windows) {
+        fs::write(&second_path, b"@echo off\r\necho 2025.03.01\r\n").unwrap();
+    } else {
+        fs::write(&second_path, b"#!/bin/sh\necho 2025.03.01\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&second_path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&second_path, permissions).unwrap();
+        }
+    }
+    let changed_settings = AppSettings {
+        custom_ytdlp_path: Some(second_path.to_string_lossy().to_string()),
+        ..AppSettings::default()
+    };
+    let changed = manager
+        .resolve_tool("yt-dlp", Some(&changed_settings))
+        .await
+        .unwrap();
+    assert_eq!(
+        changed.path, second_path,
+        "custom settings must outrank cache"
+    );
+}
+
+#[tokio::test]
+async fn test_archive_derived_binary_tampering_is_rejected() {
+    let tools_dir = tempdir().unwrap();
+    let manager = ToolManager::new(
+        Some(tools_dir.path().to_path_buf()),
+        Arc::new(DiagnosticsBuffer::new()),
+    );
+    let original: &[u8] = if cfg!(windows) {
+        b"@echo off\r\necho ffmpeg version 7.1\r\n"
+    } else {
+        b"#!/bin/sh\necho 'ffmpeg version 7.1'\n"
+    };
+    let replacement: &[u8] = if cfg!(windows) {
+        b"@echo off\r\necho ffmpeg version 7.1 modified\r\n"
+    } else {
+        b"#!/bin/sh\necho 'ffmpeg version 7.1 modified'\n"
+    };
+    let hash = {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("ffmpeg");
+        fs::write(&path, original).unwrap();
+        ToolManager::compute_sha256(&path).unwrap()
+    };
+
+    manager
+        .install_from_bytes("ffmpeg", original, &hash, false)
+        .await
+        .unwrap();
+    let installed = manager
+        .get_version_dir("ffmpeg", "7.1")
+        .join(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        });
+    fs::write(&installed, replacement).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&installed).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&installed, permissions).unwrap();
+    }
+    manager.clear_cache();
+
+    let status = manager.check_tool_status("ffmpeg", None).await;
+    assert_eq!(status.status, ToolStatus::Invalid);
+    assert!(status.error_message.unwrap().contains("checksum"));
 }
 
 #[tokio::test]

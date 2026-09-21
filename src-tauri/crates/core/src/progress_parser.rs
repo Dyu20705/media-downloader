@@ -3,6 +3,7 @@ use regex::Regex;
 use std::sync::OnceLock;
 
 static DOWNLOAD_REGEX: OnceLock<Regex> = OnceLock::new();
+pub const FINAL_PATH_PREFIX: &str = "__OCMD_FINAL_PATH__";
 
 fn get_download_regex() -> &'static Regex {
     DOWNLOAD_REGEX.get_or_init(|| {
@@ -19,6 +20,14 @@ pub enum ParsedLineEvent {
 
 pub fn parse_progress_line(line: &str) -> ParsedLineEvent {
     let trimmed = line.trim();
+
+    if let Some(path) = trimmed.strip_prefix(FINAL_PATH_PREFIX) {
+        return ParsedLineEvent::Destination(path.trim().to_string());
+    }
+
+    if let Some(path) = trimmed.strip_prefix("[download] Destination:") {
+        return ParsedLineEvent::Destination(path.trim().to_string());
+    }
 
     if trimmed.starts_with("[download]") {
         let re = get_download_regex();
@@ -56,9 +65,6 @@ pub fn parse_progress_line(line: &str) -> ParsedLineEvent {
         || trimmed.starts_with("[EmbedSubtitle]")
     {
         return ParsedLineEvent::PostProcessing(trimmed.to_string());
-    } else if trimmed.starts_with("[download] Destination:") {
-        let dest = trimmed.trim_start_matches("[download] Destination:").trim();
-        return ParsedLineEvent::Destination(dest.to_string());
     }
 
     ParsedLineEvent::Ignored
@@ -139,6 +145,24 @@ mod tests {
         assert!(matches!(
             parse_progress_line(line),
             ParsedLineEvent::PostProcessing(_)
+        ));
+    }
+
+    #[test]
+    fn test_parse_destination_before_generic_download_line() {
+        let line = "[download] Destination: /tmp/video [abc123].mp4";
+        assert!(matches!(
+            parse_progress_line(line),
+            ParsedLineEvent::Destination(path) if path == "/tmp/video [abc123].mp4"
+        ));
+    }
+
+    #[test]
+    fn test_parse_machine_readable_final_path() {
+        let line = "__OCMD_FINAL_PATH__/tmp/final video.webm";
+        assert!(matches!(
+            parse_progress_line(line),
+            ParsedLineEvent::Destination(path) if path == "/tmp/final video.webm"
         ));
     }
 }

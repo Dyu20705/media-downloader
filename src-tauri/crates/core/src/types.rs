@@ -352,6 +352,7 @@ pub struct DownloadProgress {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInspection {
+    pub verification_level: VerificationLevel,
     pub container_format: String,
     pub video_codec: Option<String>,
     pub video_profile: Option<String>,
@@ -372,6 +373,15 @@ pub struct MediaInspection {
     pub is_lossy_transcode_warning: bool,
     pub stream_count: Option<u32>,
     pub chapters_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VerificationLevel {
+    Verified,
+    BasicInspection,
+    #[default]
+    Unverified,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -425,6 +435,7 @@ pub struct VerificationChecklist {
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResult {
     pub is_valid: bool,
+    pub verification_level: VerificationLevel,
     pub checklist: VerificationChecklist,
     pub output_artifact: Option<OutputMediaArtifact>,
     pub fingerprint: Option<MediaFingerprint>,

@@ -108,12 +108,60 @@ pub fn get_pinned_tool_spec(name: &str) -> Option<&'static PinnedToolSpec> {
         .find(|t| t.name.eq_ignore_ascii_case(name))
 }
 
+fn parse_date_version(value: &str) -> Option<(u32, u32, u32)> {
+    value.split_whitespace().find_map(|token| {
+        let token =
+            token.trim_matches(|character: char| !character.is_ascii_digit() && character != '.');
+        let mut parts = token.split('.');
+        let year = parts.next()?.parse().ok()?;
+        let month = parts.next()?.parse().ok()?;
+        let day = parts.next()?.parse().ok()?;
+        if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return None;
+        }
+        Some((year, month, day))
+    })
+}
+
+fn is_date_version_older(version: &str, pinned_version: &str) -> bool {
+    match (
+        parse_date_version(version),
+        parse_date_version(pinned_version),
+    ) {
+        (Some(actual), Some(pinned)) => actual < pinned,
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedExecutable {
     pub name: String,
     pub path: PathBuf,
     pub version: Option<String>,
     pub is_managed: bool,
+}
+
+fn invalid_tool_status(
+    spec: &PinnedToolSpec,
+    source_url: &str,
+    tool: ResolvedExecutable,
+    sha256: Option<String>,
+    message: String,
+) -> ToolStatusInfo {
+    ToolStatusInfo {
+        name: spec.name.to_string(),
+        status: ToolStatus::Invalid,
+        version: tool.version,
+        pinned_version: spec.pinned_version.to_string(),
+        path: Some(tool.path.to_string_lossy().to_string()),
+        managed: true,
+        source_url: Some(source_url.to_string()),
+        sha256,
+        error_message: Some(message),
+        license: spec.license.to_string(),
+        license_url: spec.license_url.to_string(),
+        is_required: spec.is_required,
+    }
 }
 
 #[derive(Debug)]
@@ -294,21 +342,7 @@ impl ToolManager {
         tool_name: &str,
         settings: Option<&AppSettings>,
     ) -> Option<ResolvedExecutable> {
-        // Check lifetime resolution cache
-        if let Ok(cache) = self.resolution_cache.read() {
-            if let Some(tool) = cache.get(tool_name) {
-                if tool.path.exists() {
-                    return Some(ResolvedExecutable {
-                        name: tool.name.clone(),
-                        path: tool.path.clone(),
-                        version: tool.version.clone(),
-                        is_managed: tool.is_managed,
-                    });
-                }
-            }
-        }
-
-        // Priority 1: Explicit configured path from settings
+        // An explicit configured path always outranks a cached resolution.
         if let Some(settings) = settings {
             let custom_path = match tool_name {
                 "yt-dlp" => settings.custom_ytdlp_path.as_deref(),
@@ -331,6 +365,21 @@ impl ToolManager {
                         self.cache_resolution(tool_name, &res);
                         return Some(res);
                     }
+                }
+                return None;
+            }
+        }
+
+        // Check lifetime resolution cache
+        if let Ok(cache) = self.resolution_cache.read() {
+            if let Some(tool) = cache.get(tool_name) {
+                if tool.path.exists() {
+                    return Some(ResolvedExecutable {
+                        name: tool.name.clone(),
+                        path: tool.path.clone(),
+                        version: tool.version.clone(),
+                        is_managed: tool.is_managed,
+                    });
                 }
             }
         }
@@ -529,37 +578,39 @@ impl ToolManager {
             Some(tool) => {
                 // If it is managed, verify checksum or executable integrity
                 if tool.is_managed {
-                    if let Ok(actual_sha) = Self::compute_sha256(&tool.path) {
-                        let manifest = self.load_manifest();
-                        let is_manifest_match = manifest
-                            .tools
-                            .get(tool_name)
-                            .map(|entry| entry.sha256.eq_ignore_ascii_case(&actual_sha))
-                            .unwrap_or(false);
-
-                        // If file is directly pinned binary and does not match expected nor manifest
-                        if !spec.is_archive
-                            && !actual_sha.eq_ignore_ascii_case(expected_sha256)
-                            && !is_manifest_match
-                        {
-                            return ToolStatusInfo {
-                                name: tool_name.to_string(),
-                                status: ToolStatus::Invalid,
-                                version: tool.version,
-                                pinned_version: spec.pinned_version.to_string(),
-                                path: Some(tool.path.to_string_lossy().to_string()),
-                                managed: true,
-                                source_url: Some(source_url.to_string()),
-                                sha256: Some(actual_sha),
-                                error_message: Some(
-                                    "Binary checksum mismatch. Reinstallation recommended."
-                                        .to_string(),
-                                ),
-                                license: spec.license.to_string(),
-                                license_url: spec.license_url.to_string(),
-                                is_required: spec.is_required,
-                            };
+                    let actual_sha = match Self::compute_sha256(&tool.path) {
+                        Ok(hash) => hash,
+                        Err(error) => {
+                            return invalid_tool_status(
+                                spec,
+                                source_url,
+                                tool,
+                                None,
+                                format!("Could not verify managed binary checksum: {error}"),
+                            );
                         }
+                    };
+                    let manifest = self.load_manifest();
+                    let is_manifest_match = manifest.tools.get(tool_name).is_some_and(|entry| {
+                        entry.verified
+                            && entry.path == tool.path.to_string_lossy()
+                            && entry.sha256.eq_ignore_ascii_case(&actual_sha)
+                    });
+                    let is_valid = if spec.is_archive {
+                        is_manifest_match
+                    } else {
+                        actual_sha.eq_ignore_ascii_case(expected_sha256) || is_manifest_match
+                    };
+
+                    if !is_valid {
+                        return invalid_tool_status(
+                            spec,
+                            source_url,
+                            tool,
+                            Some(actual_sha),
+                            "Managed binary checksum does not match its trusted installation record. Reinstallation required."
+                                .to_string(),
+                        );
                     }
 
                     ToolStatusInfo {
@@ -570,7 +621,7 @@ impl ToolManager {
                         path: Some(tool.path.to_string_lossy().to_string()),
                         managed: true,
                         source_url: Some(source_url.to_string()),
-                        sha256: Some(expected_sha256.to_string()),
+                        sha256: Some(actual_sha),
                         error_message: None,
                         license: spec.license.to_string(),
                         license_url: spec.license_url.to_string(),
@@ -580,7 +631,18 @@ impl ToolManager {
                     // Check if a managed directory or manifest entry exists but failed validation
                     let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
                     let manifest = self.load_manifest();
-                    if version_dir.exists() || manifest.tools.contains_key(tool_name) {
+                    let is_explicit_configuration = settings
+                        .and_then(|settings| match tool_name {
+                            "yt-dlp" => settings.custom_ytdlp_path.as_deref(),
+                            "ffmpeg" => settings.custom_ffmpeg_path.as_deref(),
+                            "ffprobe" => settings.custom_ffprobe_path.as_deref(),
+                            "mediainfo" => settings.custom_mediainfo_path.as_deref(),
+                            _ => None,
+                        })
+                        .is_some_and(|path| Path::new(path) == tool.path);
+                    if !is_explicit_configuration
+                        && (version_dir.exists() || manifest.tools.contains_key(tool_name))
+                    {
                         return ToolStatusInfo {
                             name: tool_name.to_string(),
                             status: ToolStatus::Invalid,
@@ -599,23 +661,10 @@ impl ToolManager {
 
                     // Non-managed (System PATH or unmanaged fallback)
                     // If the tool executable passed validation, it is operational.
-                    // Only flag yt-dlp as outdated if it is a known legacy build (< 2024.08)
                     let is_outdated = if tool_name == "yt-dlp" {
-                        match &tool.version {
-                            Some(v) => {
-                                let trimmed = v.trim();
-                                trimmed.starts_with("2021.")
-                                    || trimmed.starts_with("2022.")
-                                    || trimmed.starts_with("2023.")
-                                    || (trimmed.starts_with("2024.")
-                                        && !trimmed.starts_with("2024.08")
-                                        && !trimmed.starts_with("2024.09")
-                                        && !trimmed.starts_with("2024.10")
-                                        && !trimmed.starts_with("2024.11")
-                                        && !trimmed.starts_with("2024.12"))
-                            }
-                            None => false,
-                        }
+                        tool.version.as_deref().is_some_and(|version| {
+                            is_date_version_older(version, spec.pinned_version)
+                        })
                     } else {
                         false
                     };
@@ -1172,5 +1221,18 @@ impl ToolManager {
             "Checking and auto-bootstrapping required engine tools",
         );
         self.install_all_missing().await
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn date_versions_are_compared_to_the_pin() {
+        assert!(is_date_version_older("2024.12.31", "2025.02.19"));
+        assert!(!is_date_version_older("2025.02.19", "2025.02.19"));
+        assert!(!is_date_version_older("stable 2026.01.02", "2025.02.19"));
+        assert!(!is_date_version_older("unknown", "2025.02.19"));
     }
 }

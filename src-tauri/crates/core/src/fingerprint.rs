@@ -141,6 +141,7 @@ mod tests {
         };
 
         let inspection = MediaInspection {
+            verification_level: crate::types::VerificationLevel::Verified,
             container_format: "mp4".to_string(),
             video_codec: Some("h264".to_string()),
             video_profile: Some("High".to_string()),
