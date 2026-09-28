@@ -3,13 +3,15 @@ use tauri::State;
 
 use crate::core::diagnostics::DiagnosticsBuffer;
 use crate::core::download_manager::DownloadManager;
-use crate::core::presets::compile_download_args;
+use crate::core::media_graph::MediaGraph;
+use crate::core::planner::AcquisitionPlanner;
+use crate::core::presets::compile_acquisition_args;
 use crate::core::settings::SettingsManager;
 use crate::core::tools::ToolResolver;
 use crate::core::types::{
-    AppSettings, BuildCommandRequest, BuildCommandResponse, DiagnosticLog, DownloadJob,
-    MediaMetadata, ResolvedMediaSource, StartDownloadRequest, ToolHealth, ToolStatusInfo,
-    ToolsManifest,
+    AcquisitionPlan, AcquisitionRequest, AppSettings, BuildCommandRequest, BuildCommandResponse,
+    DiagnosticLog, DownloadJob, MediaMetadata, ResolvedMediaSource, StartDownloadRequest,
+    ToolHealth, ToolStatusInfo, ToolsManifest,
 };
 use crate::core::universal_resolver::UniversalResolver;
 
@@ -69,6 +71,15 @@ pub async fn analyze_media(
 }
 
 #[tauri::command]
+pub async fn plan_acquisition(
+    metadata: MediaMetadata,
+    acquisition: AcquisitionRequest,
+) -> Result<AcquisitionPlan, String> {
+    let graph = MediaGraph::build_source_graph(&metadata, metadata.source_type.unwrap_or_default());
+    AcquisitionPlanner::plan(&graph, &acquisition)
+}
+
+#[tauri::command]
 pub async fn build_command(
     request: BuildCommandRequest,
     state: State<'_, AppState>,
@@ -77,13 +88,17 @@ pub async fn build_command(
         .settings
         .unwrap_or_else(|| state.settings.get_settings());
 
-    let compiled = compile_download_args(
-        request.preset,
-        &request.quality,
-        &request.output_directory,
-        &request.url,
-        &settings,
+    let graph = MediaGraph::build_source_graph(
+        &request.metadata,
+        request.metadata.source_type.unwrap_or_default(),
     );
+    let plan = AcquisitionPlanner::plan(&graph, &request.acquisition)?;
+    let compiled = compile_acquisition_args(
+        &plan,
+        &request.acquisition,
+        &request.metadata.webpage_url,
+        &settings,
+    )?;
 
     let full_display = format!("yt-dlp {}", compiled.arguments.join(" "));
 

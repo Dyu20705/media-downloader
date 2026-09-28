@@ -3,6 +3,175 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SourceScope {
+    #[default]
+    SingleMedia,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(
+    tag = "type",
+    rename_all = "SCREAMING_SNAKE_CASE",
+    rename_all_fields = "camelCase"
+)]
+pub enum AcquisitionOperation {
+    #[default]
+    EntireMedia,
+    Clip {
+        start_ms: u64,
+        end_ms: u64,
+    },
+    AudioOnly,
+    ThumbnailOnly,
+    Chapter {
+        chapter_index: u32,
+    },
+    SubtitlesOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum OutputProfile {
+    BestSource,
+    #[default]
+    Universal,
+    Editing,
+    Small,
+    Custom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackSelection {
+    pub audio_language: Option<String>,
+    pub subtitle_languages: Vec<String>,
+    pub include_auto_subtitles: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DuplicatePolicy {
+    #[default]
+    Rename,
+    Skip,
+    Overwrite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataPatch {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+}
+
+/// Product-level intent. Execution arguments are deliberately not part of this contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquisitionRequest {
+    pub source_scope: SourceScope,
+    pub operation: AcquisitionOperation,
+    pub output_profile: OutputProfile,
+    pub track_selection: TrackSelection,
+    pub metadata_patch: Option<MetadataPatch>,
+    pub duplicate_policy: DuplicatePolicy,
+    pub output_directory: String,
+    /// Optional user constraint; `None` means the best suitable source height.
+    pub max_video_height: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSummary {
+    pub url: String,
+    pub title: String,
+    pub extractor: String,
+    pub media_kind: MediaKind,
+    pub duration_seconds: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedStreams {
+    pub video_stream_id: Option<String>,
+    pub audio_stream_id: Option<String>,
+    pub subtitle_languages: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedArtifact {
+    pub container: String,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fps: Option<f64>,
+    pub audio_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProcessingClass {
+    #[default]
+    SourcePreserved,
+    MergeOnly,
+    RemuxOnly,
+    AudioTranscode,
+    VideoTranscode,
+    FullTranscode,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessingPlan {
+    pub class: ProcessingClass,
+    pub requires_ffmpeg: bool,
+    pub steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizeEstimate {
+    pub bytes: u64,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanWarning {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanRequirement {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquisitionPlan {
+    pub time_range_ms: Option<[u64; 2]>,
+    pub id: String,
+    pub version: u32,
+    pub source: SourceSummary,
+    pub scope: SourceScope,
+    pub operation: AcquisitionOperation,
+    pub output_profile: OutputProfile,
+    pub selected_streams: SelectedStreams,
+    pub output: PlannedArtifact,
+    pub processing: ProcessingPlan,
+    pub estimated_size: Option<SizeEstimate>,
+    pub warnings: Vec<PlanWarning>,
+    pub requirements: Vec<PlanRequirement>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MediaSourceType {
     #[default]
     YtDlpExtractor,
@@ -501,6 +670,7 @@ pub struct DownloadJob {
     pub fingerprint: Option<MediaFingerprint>,
     pub explainable_result: Option<ExplainableResult>,
     pub verification: Option<VerificationResult>,
+    pub acquisition_plan: AcquisitionPlan,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -636,20 +806,15 @@ pub struct DiagnosticLog {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartDownloadRequest {
-    pub url: String,
     pub metadata: MediaMetadata,
-    pub preset: PresetType,
-    pub quality: String,
-    pub output_directory: String,
+    pub acquisition: AcquisitionRequest,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildCommandRequest {
-    pub preset: PresetType,
-    pub quality: String,
-    pub output_directory: String,
-    pub url: String,
+    pub metadata: MediaMetadata,
+    pub acquisition: AcquisitionRequest,
     pub settings: Option<AppSettings>,
 }
 

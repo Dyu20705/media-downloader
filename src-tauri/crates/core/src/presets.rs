@@ -1,11 +1,193 @@
 use crate::progress_parser::FINAL_PATH_PREFIX;
-use crate::types::{AppSettings, PresetType};
+use crate::types::{
+    AcquisitionOperation, AcquisitionPlan, AcquisitionRequest, AppSettings, OutputProfile,
+    PresetType, ProcessingClass,
+};
 
 #[derive(Debug, Clone)]
 pub struct CompiledPreset {
     pub arguments: Vec<String>,
     pub is_audio_only: bool,
     pub is_lossy_conversion: bool,
+}
+
+/// Compiles only the execution details already decided by the canonical planner.
+/// Stream choice, output shape, and processing policy must not be inferred here.
+pub fn compile_acquisition_args(
+    plan: &AcquisitionPlan,
+    request: &AcquisitionRequest,
+    url: &str,
+    settings: &AppSettings,
+) -> Result<CompiledPreset, String> {
+    if matches!(
+        plan.operation,
+        AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
+    ) {
+        let mut args = vec![
+            "--ignore-config".into(),
+            "--no-playlist".into(),
+            "--skip-download".into(),
+            "--no-simulate".into(),
+            "-o".into(),
+            std::path::Path::new(&request.output_directory)
+                .join("artifact.%(ext)s")
+                .to_string_lossy()
+                .into_owned(),
+        ];
+        if matches!(plan.operation, AcquisitionOperation::ThumbnailOnly) {
+            args.extend([
+                "--write-thumbnail".into(),
+                "--convert-thumbnails".into(),
+                "jpg".into(),
+            ]);
+        } else {
+            args.extend([
+                "--write-subs".into(),
+                "--sub-format".into(),
+                "vtt".into(),
+                "--sub-langs".into(),
+                plan.selected_streams.subtitle_languages.join(","),
+            ]);
+            if request.track_selection.include_auto_subtitles {
+                args.push("--write-auto-subs".into());
+            }
+        }
+        args.push(url.into());
+        return Ok(CompiledPreset {
+            arguments: args,
+            is_audio_only: false,
+            is_lossy_conversion: false,
+        });
+    }
+    let mut args = vec![
+        "--newline".to_string(),
+        "--progress".to_string(),
+        "--no-warnings".to_string(),
+        "--print".to_string(),
+        format!("after_move:{}%(filepath)s", FINAL_PATH_PREFIX),
+        "--concurrent-fragments".to_string(),
+        settings.concurrent_fragments.max(1).to_string(),
+    ];
+
+    let video_id = plan.selected_streams.video_stream_id.as_deref();
+    let audio_id = plan.selected_streams.audio_stream_id.as_deref();
+    let format_selector = match (video_id, audio_id) {
+        (Some(video), Some(audio)) if video == audio => video.to_string(),
+        (Some(video), Some(audio)) => format!("{video}+{audio}"),
+        (Some(video), None) => video.to_string(),
+        (None, Some(audio)) => audio.to_string(),
+        (None, None) => {
+            return Err("The acquisition plan selected no executable stream".to_string())
+        }
+    };
+    args.push("-f".to_string());
+    args.push(format_selector);
+    args.push("--no-playlist".to_string());
+    if let Some([start_ms, end_ms]) = plan.time_range_ms {
+        args.extend([
+            "--download-sections".to_string(),
+            format!(
+                "*{}.{:03}-{}.{:03}",
+                start_ms / 1000,
+                start_ms % 1000,
+                end_ms / 1000,
+                end_ms % 1000
+            ),
+        ]);
+    }
+
+    let is_audio_only = matches!(request.operation, AcquisitionOperation::AudioOnly);
+    if is_audio_only {
+        args.push("-x".to_string());
+        if matches!(
+            request.output_profile,
+            OutputProfile::Universal | OutputProfile::Editing
+        ) {
+            args.push("--audio-format".to_string());
+            args.push(plan.output.container.clone());
+            if request.output_profile == OutputProfile::Universal {
+                args.push("--audio-quality".to_string());
+                args.push("0".to_string());
+            }
+        }
+    } else {
+        args.push("--merge-output-format".to_string());
+        args.push(plan.output.container.clone());
+        if matches!(
+            plan.processing.class,
+            ProcessingClass::AudioTranscode
+                | ProcessingClass::VideoTranscode
+                | ProcessingClass::FullTranscode
+        ) {
+            args.push("--recode-video".to_string());
+            args.push(plan.output.container.clone());
+        }
+    }
+
+    if settings.embed_metadata {
+        args.push("--embed-metadata".to_string());
+    }
+    if settings.embed_thumbnail {
+        args.push("--embed-thumbnail".to_string());
+    }
+    if settings.embed_chapters && !is_audio_only {
+        args.push("--embed-chapters".to_string());
+    }
+    match settings.sponsor_block_mode {
+        crate::types::SponsorBlockMode::MarkChapters => {
+            args.extend(["--sponsorblock-mark".to_string(), "all".to_string()]);
+        }
+        crate::types::SponsorBlockMode::RemoveSegments => {
+            args.extend(["--sponsorblock-remove".to_string(), "all".to_string()]);
+        }
+        crate::types::SponsorBlockMode::Off => {}
+    }
+
+    if !plan.selected_streams.subtitle_languages.is_empty() && !is_audio_only {
+        args.push("--sub-langs".to_string());
+        args.push(plan.selected_streams.subtitle_languages.join(","));
+        if matches!(settings.subtitle_mode, crate::types::SubtitleMode::Embed) {
+            args.push("--embed-subs".to_string());
+        } else {
+            args.push("--write-subs".to_string());
+        }
+    }
+
+    let separator =
+        if request.output_directory.ends_with('/') || request.output_directory.ends_with('\\') {
+            ""
+        } else if cfg!(windows) || request.output_directory.contains('\\') {
+            "\\"
+        } else {
+            "/"
+        };
+    args.push("-o".to_string());
+    let range_suffix = match plan.operation {
+        AcquisitionOperation::Chapter { chapter_index } => {
+            format!(" [chapter-{}]", chapter_index + 1)
+        }
+        AcquisitionOperation::Clip { start_ms, end_ms } => format!(" [clip-{start_ms}-{end_ms}]"),
+        _ => String::new(),
+    };
+    args.push(format!(
+        "{}{}%(title).{}B [%(id)s]{}.%(ext)s",
+        request.output_directory,
+        separator,
+        settings.trim_filenames.max(1),
+        range_suffix
+    ));
+    args.push(url.to_string());
+
+    Ok(CompiledPreset {
+        arguments: args,
+        is_audio_only,
+        is_lossy_conversion: matches!(
+            plan.processing.class,
+            ProcessingClass::AudioTranscode
+                | ProcessingClass::VideoTranscode
+                | ProcessingClass::FullTranscode
+        ),
+    })
 }
 
 pub fn compile_download_args(

@@ -1,5 +1,5 @@
 use crate::types::{
-    DownloadJob, DownloadRecipe, DownloadStrategy, MediaSourceType, PresetType,
+    DownloadJob, DownloadRecipe, DownloadStrategy, MediaSourceType, ProcessingClass,
     VerificationChecklist,
 };
 use std::collections::hash_map::DefaultHasher;
@@ -24,20 +24,22 @@ impl RecipeEngine {
             .clone()
             .unwrap_or_else(|| "generic".to_string());
 
-        let output_container = match job.preset {
-            PresetType::Mp4Compatible => "mp4".to_string(),
-            PresetType::BestVideo => "mkv".to_string(),
-            PresetType::BestAudio => "m4a".to_string(),
-            PresetType::Mp3 => "mp3".to_string(),
-            PresetType::Flac => "flac".to_string(),
+        let output_container = job.acquisition_plan.output.container.clone();
+
+        let strategy = match job.acquisition_plan.processing.class {
+            ProcessingClass::SourcePreserved => DownloadStrategy::YtDlpDownload,
+            ProcessingClass::MergeOnly => DownloadStrategy::YtDlpMerge,
+            ProcessingClass::RemuxOnly => DownloadStrategy::FfmpegRemux,
+            ProcessingClass::AudioTranscode
+            | ProcessingClass::VideoTranscode
+            | ProcessingClass::FullTranscode => DownloadStrategy::FfmpegTranscode,
+            ProcessingClass::Unknown => job
+                .metadata
+                .strategy
+                .unwrap_or(DownloadStrategy::YtDlpMerge),
         };
 
-        let strategy = job
-            .metadata
-            .strategy
-            .unwrap_or(DownloadStrategy::YtDlpMerge);
-
-        let mut transformations = Vec::new();
+        let mut transformations = job.acquisition_plan.processing.steps.clone();
         match strategy {
             DownloadStrategy::DirectCopy => {
                 transformations.push("Direct stream copy (zero re-encoding)".to_string());
@@ -92,7 +94,19 @@ impl RecipeEngine {
             source_url: sanitize_url(&job.url),
             resolver_type,
             extractor,
-            selected_candidates: vec![job.quality.clone()],
+            selected_candidates: [
+                job.acquisition_plan
+                    .selected_streams
+                    .video_stream_id
+                    .clone(),
+                job.acquisition_plan
+                    .selected_streams
+                    .audio_stream_id
+                    .clone(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
             strategy,
             output_container,
             transformations,
@@ -169,7 +183,25 @@ mod tests {
             subtitles: None,
             automatic_captions: None,
             chapters: None,
-            formats: None,
+            formats: Some(vec![MediaFormatSpec {
+                format_id: "combined".to_string(),
+                ext: "mp4".to_string(),
+                resolution: Some("1920x1080".to_string()),
+                width: Some(1920),
+                height: Some(1080),
+                fps: Some(30.0),
+                vcodec: Some("avc1.640028".to_string()),
+                acodec: Some("mp4a.40.2".to_string()),
+                filesize: Some(10_000_000),
+                filesize_approx: None,
+                tbr: Some(1500.0),
+                vbr: Some(1300.0),
+                abr: Some(128.0),
+                hdr: Some(false),
+                dynamic_range: None,
+                audio_sample_rate: Some(48_000),
+                audio_channels: Some(2),
+            }]),
             smart_recommendation: None,
             source_type: Some(MediaSourceType::YtDlpExtractor),
             strategy: Some(DownloadStrategy::YtDlpMerge),
@@ -177,6 +209,23 @@ mod tests {
             transcoding_explanation: None,
             capabilities: None,
         };
+
+        let acquisition = AcquisitionRequest {
+            source_scope: SourceScope::SingleMedia,
+            operation: AcquisitionOperation::EntireMedia,
+            output_profile: OutputProfile::Universal,
+            track_selection: TrackSelection::default(),
+            metadata_patch: None,
+            duplicate_policy: DuplicatePolicy::Rename,
+            output_directory: "/tmp".to_string(),
+            max_video_height: Some(1080),
+        };
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &meta,
+            meta.source_type.unwrap_or_default(),
+        );
+        let acquisition_plan =
+            crate::planner::AcquisitionPlanner::plan(&graph, &acquisition).unwrap();
 
         let job = DownloadJob {
             id: "job_01".to_string(),
@@ -200,13 +249,14 @@ mod tests {
             fingerprint: None,
             explainable_result: None,
             verification: None,
+            acquisition_plan,
         };
 
         let recipe = RecipeEngine::create_recipe(&job, None);
         assert!(recipe.id.starts_with("recipe_"));
         assert!(!recipe.source_url.contains("SECRET_123"));
         assert_eq!(recipe.output_container, "mp4");
-        assert_eq!(recipe.strategy, DownloadStrategy::YtDlpMerge);
+        assert_eq!(recipe.strategy, DownloadStrategy::YtDlpDownload);
         assert!(recipe.transformations.len() >= 2);
     }
 }

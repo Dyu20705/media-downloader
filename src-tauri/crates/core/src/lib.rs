@@ -8,6 +8,7 @@ pub mod media_diff;
 pub mod media_graph;
 pub mod media_verifier;
 pub mod path_validator;
+pub mod planner;
 pub mod presets;
 pub mod process_runner;
 pub mod progress_parser;

@@ -1,5 +1,5 @@
 use crate::types::{
-    DownloadJob, ExplainableResult, MediaInspection, MediaKind, OutputMediaArtifact, PresetType,
+    AcquisitionOperation, DownloadJob, ExplainableResult, MediaInspection, OutputMediaArtifact,
     TranscodingCost, VerificationChecklist, VerificationLevel, VerificationResult,
 };
 use serde_json::Value;
@@ -71,6 +71,63 @@ pub async fn verify_and_inspect_media(
 }
 
 /// Generates full VerificationResult and ExplainableResult from completed job and inspection
+pub async fn verify_subtitle(path: &Path) -> Result<MediaInspection, String> {
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > 16 * 1024 * 1024 {
+        return Err("Subtitle exceeds the 16 MiB inspection limit".into());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let text = text.trim_start_matches('\u{feff}');
+    if !valid_webvtt(text) {
+        return Err("Subtitle is not a WebVTT document with timed cues".into());
+    }
+    let mut inspection = verify_and_inspect_media(path, None, false).await?;
+    inspection.verification_level = VerificationLevel::Verified;
+    inspection.container_format = "vtt".into();
+    Ok(inspection)
+}
+
+fn valid_webvtt(text: &str) -> bool {
+    let header = text.lines().next().unwrap_or_default();
+    if header != "WEBVTT" && !header.starts_with("WEBVTT ") && !header.starts_with("WEBVTT\t") {
+        return false;
+    }
+    let timestamp = |value: &str| -> Option<f64> {
+        let parts: Vec<_> = value.split(':').collect();
+        if !(2..=3).contains(&parts.len()) {
+            return None;
+        }
+        let seconds = parts[parts.len() - 1].parse::<f64>().ok()?;
+        let minutes = parts[parts.len() - 2].parse::<u32>().ok()?;
+        let hours = if parts.len() == 3 {
+            parts[0].parse::<u32>().ok()?
+        } else {
+            0
+        };
+        if !seconds.is_finite() || !(0.0..60.0).contains(&seconds) || minutes >= 60 {
+            return None;
+        }
+        Some(hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds)
+    };
+    let mut cues = 0;
+    for line in text.lines().filter(|line| line.contains("-->")) {
+        let Some((start, end)) = line.split_once("-->") else {
+            return false;
+        };
+        let Some(start) = timestamp(start.trim()) else {
+            return false;
+        };
+        let Some(end) = end.split_whitespace().next().and_then(timestamp) else {
+            return false;
+        };
+        if end <= start {
+            return false;
+        }
+        cues += 1;
+    }
+    cues > 0
+}
+
 pub fn generate_verification_and_explanation(
     job: &DownloadJob,
     inspection: &MediaInspection,
@@ -84,16 +141,29 @@ pub fn generate_verification_and_explanation(
     };
 
     let is_audio_only = matches!(
-        job.preset,
-        PresetType::BestAudio | PresetType::Mp3 | PresetType::Flac
-    ) || job.metadata.media_kind == MediaKind::Audio;
+        job.acquisition_plan.operation,
+        AcquisitionOperation::AudioOnly
+    );
 
     let file_exists = std::path::Path::new(file_path).exists();
-    let file_size_valid = inspection.file_size_bytes > 1024;
-    let duration_valid = inspection.duration_seconds.is_some_and(|d| d > 0.0);
-    let expects_video = !is_audio_only && job.metadata.has_video;
-    let expects_audio = is_audio_only || job.metadata.has_audio;
-    let video_stream_valid = if !expects_video {
+    let thumbnail = matches!(
+        job.acquisition_plan.operation,
+        AcquisitionOperation::ThumbnailOnly
+    );
+    let subtitle = matches!(
+        job.acquisition_plan.operation,
+        AcquisitionOperation::SubtitlesOnly
+    );
+    let sidecar = thumbnail || subtitle;
+    let file_size_valid = inspection.file_size_bytes > if sidecar { 0 } else { 1024 };
+    let duration_valid = sidecar || inspection.duration_seconds.is_some_and(|d| d > 0.0);
+    let expects_video = thumbnail || (!sidecar && !is_audio_only && job.metadata.has_video);
+    let expects_audio = !sidecar && (is_audio_only || job.metadata.has_audio);
+    let video_stream_valid = if thumbnail {
+        inspection.video_codec.as_deref() == Some("mjpeg")
+            && inspection.width.is_some_and(|v| v > 0)
+            && inspection.height.is_some_and(|v| v > 0)
+    } else if !expects_video {
         true
     } else {
         inspection.video_codec.is_some()
@@ -103,6 +173,10 @@ pub fn generate_verification_and_explanation(
         && !inspection.container_format.eq_ignore_ascii_case("unknown");
 
     let mut notes = Vec::new();
+    if sidecar {
+        notes
+            .push("Duration and absent media streams are not applicable for this artifact.".into());
+    }
     if file_size_valid {
         notes.push(format!(
             "File verified: {:.2} MB",
@@ -160,7 +234,15 @@ pub fn generate_verification_and_explanation(
     };
 
     // Construct specs label (e.g. "1080p60 H.264 + AAC" or "Audio · 320kbps MP3")
-    let specs_label = if is_audio_only {
+    let specs_label = if subtitle {
+        "WebVTT subtitles".to_string()
+    } else if thumbnail {
+        format!(
+            "JPEG thumbnail · {}×{}",
+            inspection.width.unwrap_or(0),
+            inspection.height.unwrap_or(0)
+        )
+    } else if is_audio_only {
         let codec = inspection.audio_codec.as_deref().unwrap_or("unknown");
         let br = inspection
             .audio_bitrate_kbps
@@ -190,7 +272,9 @@ pub fn generate_verification_and_explanation(
         )
     };
 
-    let why_reasons = if let Some(rec) = &job.metadata.smart_recommendation {
+    let why_reasons = if sidecar {
+        vec!["Artifact-specific inspection; media duration is not applicable.".into()]
+    } else if let Some(rec) = &job.metadata.smart_recommendation {
         rec.why_reasons.clone()
     } else {
         let mut reasons = vec![
@@ -226,7 +310,11 @@ pub fn generate_verification_and_explanation(
         title: job.metadata.title.clone(),
         specs_label,
         why_reasons,
-        processing_summary,
+        processing_summary: if sidecar {
+            job.acquisition_plan.processing.steps.join("; ")
+        } else {
+            processing_summary
+        },
         transcoding_cost,
         verification_checklist: checklist.clone(),
         recipe_id: job.recipe.as_ref().map(|r| r.id.clone()),
@@ -479,6 +567,14 @@ pub fn resolve_final_download_path(output_dir: &Path, media_id: &str) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subtitle_validation_rejects_html_and_invalid_timing() {
+        assert!(valid_webvtt("WEBVTT\n\n00:00.000 --> 00:02.500\nHello\n"));
+        assert!(!valid_webvtt("<html>error</html>"));
+        assert!(!valid_webvtt("WEBVTT\n\ngarbage --> garbage\n"));
+        assert!(!valid_webvtt("WEBVTT\n\n00:04.000 --> 00:02.500\nHello"));
+        assert!(!valid_webvtt("WEBVTT\n\n"));
+    }
 
     #[tokio::test]
     async fn missing_ffprobe_produces_basic_inspection_only() {

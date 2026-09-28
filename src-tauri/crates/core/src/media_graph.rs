@@ -17,7 +17,12 @@ impl MediaGraph {
         if let Some(formats) = &metadata.formats {
             for f in formats {
                 if let (Some(w), Some(h)) = (f.width, f.height) {
-                    if w > 0 && h > 0 {
+                    if w > 0
+                        && h > 0
+                        && f.vcodec
+                            .as_deref()
+                            .is_some_and(|codec| !codec.eq_ignore_ascii_case("none"))
+                    {
                         video_streams.push(VideoStreamSpec {
                             stream_id: f.format_id.clone(),
                             codec: f.vcodec.clone().unwrap_or_else(|| "unknown".to_string()),
@@ -72,7 +77,27 @@ impl MediaGraph {
             duration_seconds: metadata.duration,
             video_streams,
             audio_streams,
-            subtitle_streams: metadata.subtitles.clone().unwrap_or_default(),
+            subtitle_streams: metadata
+                .subtitles
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|mut t| {
+                    t.is_auto = Some(false);
+                    t
+                })
+                .chain(
+                    metadata
+                        .automatic_captions
+                        .clone()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|mut t| {
+                            t.is_auto = Some(true);
+                            t
+                        }),
+                )
+                .collect(),
             chapters: metadata.chapters.clone().unwrap_or_default(),
             thumbnails,
             formats: metadata.formats.clone().unwrap_or_default(),
