@@ -79,10 +79,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             />
           </div>
 
-          {/* Default Preset */}
+          {/* Backward-compatible default workflow */}
           <div className="space-y-1.5">
             <label htmlFor="settings-default-preset" className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-              Default Format
+              Default Workflow
             </label>
             <select
               id="settings-default-preset"
@@ -90,11 +90,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onChange={(e) => setForm({ ...form, lastPreset: e.target.value as PresetType })}
               className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500"
             >
-              <option value="mp4-compatible">MP4 — Compatible (Default Video)</option>
-              <option value="best-video">Best Video (Highest Quality MKV)</option>
-              <option value="best-audio">Best Audio (Source Preservation)</option>
-              <option value="mp3">MP3 (Universal, Lossy)</option>
-              <option value="flac">FLAC Output</option>
+              <option value="mp4-compatible">Entire Media · Universal</option>
+              <option value="best-video">Entire Media · Best Source</option>
+              <option value="best-audio">Audio Only · Best Source</option>
+              <option value="mp3">Audio Only · Universal</option>
+              <option value="flac">Audio Only · Editing</option>
             </select>
           </div>
 

@@ -615,7 +615,7 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   <div>
                     <span className="text-zinc-500 block">Container:</span>
                     <span className="font-bold text-zinc-100">
-                      {inspection?.containerFormat || job?.preset.toUpperCase() || 'MKV / MP4'}
+                      {inspection?.containerFormat || job?.acquisitionPlan.output.container.toUpperCase() || 'Unknown'}
                     </span>
                   </div>
                   <div>

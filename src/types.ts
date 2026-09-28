@@ -30,6 +30,78 @@ export type PresetType =
   | 'mp3'
   | 'flac';
 
+export type SourceScope = 'SINGLE_MEDIA';
+export type AcquisitionOperation =
+  | { type: 'ENTIRE_MEDIA' }
+  | { type: 'CLIP'; startMs: number; endMs: number }
+  | { type: 'AUDIO_ONLY' }
+  | { type: 'THUMBNAIL_ONLY' }
+  | { type: 'CHAPTER'; chapterIndex: number }
+  | { type: 'SUBTITLES_ONLY' };
+export type OutputProfile = 'BEST_SOURCE' | 'UNIVERSAL' | 'EDITING' | 'SMALL' | 'CUSTOM';
+export type DuplicatePolicy = 'RENAME' | 'SKIP' | 'OVERWRITE';
+export type ProcessingClass =
+  | 'SOURCE_PRESERVED'
+  | 'MERGE_ONLY'
+  | 'REMUX_ONLY'
+  | 'AUDIO_TRANSCODE'
+  | 'VIDEO_TRANSCODE'
+  | 'FULL_TRANSCODE'
+  | 'UNKNOWN';
+
+export interface AcquisitionRequest {
+  sourceScope: SourceScope;
+  operation: AcquisitionOperation;
+  outputProfile: OutputProfile;
+  trackSelection: {
+    audioLanguage?: string | null;
+    subtitleLanguages: string[];
+    includeAutoSubtitles: boolean;
+  };
+  metadataPatch?: { title?: string | null; artist?: string | null; album?: string | null } | null;
+  duplicatePolicy: DuplicatePolicy;
+  outputDirectory: string;
+  maxVideoHeight?: number | null;
+}
+
+export interface AcquisitionPlan {
+  timeRangeMs?: [number, number] | null;
+  id: string;
+  version: number;
+  source: {
+    url: string;
+    title: string;
+    extractor: string;
+    mediaKind: MediaKind;
+    durationSeconds?: number | null;
+  };
+  scope: SourceScope;
+  operation: AcquisitionOperation;
+  outputProfile: OutputProfile;
+  selectedStreams: {
+    videoStreamId?: string | null;
+    audioStreamId?: string | null;
+    subtitleLanguages: string[];
+  };
+  output: {
+    container: string;
+    videoCodec?: string | null;
+    audioCodec?: string | null;
+    width?: number | null;
+    height?: number | null;
+    fps?: number | null;
+    audioOnly: boolean;
+  };
+  processing: {
+    class: ProcessingClass;
+    requiresFfmpeg: boolean;
+    steps: string[];
+  };
+  estimatedSize?: { bytes: number; confidence: string } | null;
+  warnings: Array<{ code: string; message: string }>;
+  requirements: Array<{ code: string; message: string }>;
+}
+
 export type MediaKind = 'video' | 'audio' | 'livestream';
 export type UserIntent = 'max-quality' | 'smallest-size' | 'best-compatibility' | 'balanced';
 export type SponsorBlockMode = 'off' | 'mark-chapters' | 'remove-segments';
@@ -288,6 +360,7 @@ export interface DownloadJob {
   fingerprint?: MediaFingerprint | null;
   explainableResult?: ExplainableResult | null;
   verification?: VerificationResult | null;
+  acquisitionPlan: AcquisitionPlan;
 }
 
 export interface AppSettings {
@@ -344,18 +417,13 @@ export interface DiagnosticLog {
 }
 
 export interface StartDownloadRequest {
-  url: string;
   metadata: MediaMetadata;
-  preset: PresetType;
-  quality: string;
-  outputDirectory: string;
+  acquisition: AcquisitionRequest;
 }
 
 export interface BuildCommandRequest {
-  preset: PresetType;
-  quality: string;
-  outputDirectory: string;
-  url: string;
+  metadata: MediaMetadata;
+  acquisition: AcquisitionRequest;
   settings?: AppSettings | null;
 }
 

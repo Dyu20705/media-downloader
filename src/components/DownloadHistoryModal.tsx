@@ -2,6 +2,7 @@ import React from 'react';
 import { X, History, FolderOpen, Play, Info, CheckCircle2, XCircle, Ban } from 'lucide-react';
 import { DownloadJob } from '../types';
 import { ipc } from '../services/ipc';
+import { operationLabel, profileLabel } from '../acquisition';
 
 interface DownloadHistoryModalProps {
   isOpen: boolean;
@@ -84,7 +85,7 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                     </h3>
                   </div>
                   <div className="text-[11px] text-zinc-400 flex items-center gap-2">
-                    <span className="font-mono uppercase">{job.preset}</span>
+                    <span>{operationLabel(job.acquisitionPlan.operation)} · {profileLabel(job.acquisitionPlan.outputProfile)}</span>
                     <span>•</span>
                     <span className="font-mono text-zinc-500 truncate max-w-[200px] sm:max-w-xs">
                       {job.finalFileName || job.url}
