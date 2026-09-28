@@ -11,11 +11,13 @@ interface UseAcquisitionPlanResult {
 export function useAcquisitionPlan(
   metadata: MediaMetadata | null,
   acquisition: AcquisitionRequest | null,
+  settingsRevision?: unknown,
 ): UseAcquisitionPlanResult {
   const [plan, setPlan] = useState<AcquisitionPlan | null>(null);
   const [isPlanning, setIsPlanning] = useState(false);
   const [planningError, setPlanningError] = useState<AppError | null>(null);
   const requestId = useRef(0);
+  const [resolvedInput, setResolvedInput] = useState<{ metadata: MediaMetadata; acquisition: AcquisitionRequest; settingsRevision: unknown } | null>(null);
 
   useEffect(() => {
     const currentRequest = ++requestId.current;
@@ -33,7 +35,10 @@ export function useAcquisitionPlan(
 
     void ipc.planAcquisition(metadata, acquisition)
       .then((nextPlan) => {
-        if (currentRequest === requestId.current) setPlan(nextPlan);
+        if (currentRequest === requestId.current) {
+          setPlan(nextPlan);
+          setResolvedInput({ metadata, acquisition, settingsRevision });
+        }
       })
       .catch((error: unknown) => {
         if (currentRequest !== requestId.current) return;
@@ -46,7 +51,9 @@ export function useAcquisitionPlan(
       .finally(() => {
         if (currentRequest === requestId.current) setIsPlanning(false);
       });
-  }, [metadata, acquisition]);
+    return () => { requestId.current += 1; };
+  }, [metadata, acquisition, settingsRevision]);
 
-  return { plan, isPlanning, planningError };
+  const current = resolvedInput?.metadata === metadata && resolvedInput?.acquisition === acquisition && resolvedInput?.settingsRevision === settingsRevision;
+  return { plan: current ? plan : null, isPlanning: isPlanning || Boolean(metadata && acquisition && !current && !planningError), planningError };
 }

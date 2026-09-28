@@ -155,6 +155,7 @@ pub struct PlanRequirement {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcquisitionPlan {
+    pub post_process: PostProcessPolicy,
     pub time_range_ms: Option<[u64; 2]>,
     pub id: String,
     pub version: u32,
@@ -168,6 +169,28 @@ pub struct AcquisitionPlan {
     pub estimated_size: Option<SizeEstimate>,
     pub warnings: Vec<PlanWarning>,
     pub requirements: Vec<PlanRequirement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PostProcessPolicy {
+    pub embed_metadata: bool,
+    pub embed_thumbnail: bool,
+    pub embed_chapters: bool,
+    pub subtitle_mode: SubtitleMode,
+    pub sponsor_block_mode: SponsorBlockMode,
+}
+
+impl From<&AppSettings> for PostProcessPolicy {
+    fn from(settings: &AppSettings) -> Self {
+        Self {
+            embed_metadata: settings.embed_metadata,
+            embed_thumbnail: settings.embed_thumbnail,
+            embed_chapters: settings.embed_chapters,
+            subtitle_mode: settings.subtitle_mode,
+            sponsor_block_mode: settings.sponsor_block_mode,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -806,6 +829,7 @@ pub struct DiagnosticLog {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartDownloadRequest {
+    pub expected_plan_id: String,
     pub metadata: MediaMetadata,
     pub acquisition: AcquisitionRequest,
 }

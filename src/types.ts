@@ -65,6 +65,13 @@ export interface AcquisitionRequest {
 }
 
 export interface AcquisitionPlan {
+  postProcess: {
+    embedMetadata: boolean;
+    embedThumbnail: boolean;
+    embedChapters: boolean;
+    subtitleMode: SubtitleMode;
+    sponsorBlockMode: SponsorBlockMode;
+  };
   timeRangeMs?: [number, number] | null;
   id: string;
   version: number;
@@ -417,6 +424,7 @@ export interface DiagnosticLog {
 }
 
 export interface StartDownloadRequest {
+  expectedPlanId: string;
   metadata: MediaMetadata;
   acquisition: AcquisitionRequest;
 }

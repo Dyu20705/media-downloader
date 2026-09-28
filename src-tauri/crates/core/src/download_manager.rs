@@ -76,6 +76,27 @@ impl DownloadManager {
             }
         }
 
+        // Bind admission to the plan the user reviewed, before filesystem or network work.
+        let source_graph = crate::media_graph::MediaGraph::build_source_graph(
+            &request.metadata,
+            request.metadata.source_type.unwrap_or_default(),
+        );
+        let current_settings = self.settings.get_settings();
+        let plan = AcquisitionPlanner::plan_with_policy(
+            &source_graph,
+            &request.acquisition,
+            (&current_settings).into(),
+        )?;
+        if plan.id != request.expected_plan_id {
+            return Err(
+                "Acquisition plan changed. Review the updated plan before downloading.".into(),
+            );
+        }
+        for tool in required_tools(&plan) {
+            self.tool_resolver.resolve_tool_with_settings(tool, Some(&current_settings))
+                .await.ok_or_else(|| format!("Required tool {tool} is unavailable. Install or repair it before downloading."))?;
+        }
+
         // 2. Validate URL and Output Directory
         let valid_url = validate_media_url_network(&request.metadata.webpage_url)
             .await
@@ -85,20 +106,14 @@ impl DownloadManager {
                 .map_err(|e| e.to_string())?;
 
         // 3. Resolve yt-dlp tool
-        let current_settings = self.settings.get_settings();
         let ytdlp_tool = self
             .tool_resolver
             .resolve_tool_with_settings("yt-dlp", Some(&current_settings))
             .await
             .ok_or_else(|| "yt-dlp executable not found".to_string())?;
 
-        let source_graph = crate::media_graph::MediaGraph::build_source_graph(
-            &request.metadata,
-            request.metadata.source_type.unwrap_or_default(),
-        );
         let mut acquisition = request.acquisition.clone();
         acquisition.output_directory = output_dir_path.to_string_lossy().to_string();
-        let plan = AcquisitionPlanner::plan(&source_graph, &acquisition)?;
         let sidecar = matches!(
             plan.operation,
             AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
@@ -454,6 +469,17 @@ impl DownloadManager {
     }
 }
 
+fn required_tools(plan: &crate::types::AcquisitionPlan) -> Vec<&'static str> {
+    let mut tools = vec!["yt-dlp"];
+    if plan.processing.requires_ffmpeg {
+        tools.push("ffmpeg");
+    }
+    if !matches!(plan.operation, AcquisitionOperation::SubtitlesOnly) {
+        tools.push("ffprobe");
+    }
+    tools
+}
+
 fn legacy_job_labels(request: &crate::types::AcquisitionRequest) -> (PresetType, String) {
     let preset = match (&request.operation, request.output_profile) {
         (AcquisitionOperation::AudioOnly, OutputProfile::Universal) => PresetType::Mp3,
@@ -625,7 +651,8 @@ mod tests {
             diagnostics,
             Arc::new(SettingsManager::new()),
         ));
-        let request = StartDownloadRequest {
+        let mut request = StartDownloadRequest {
+            expected_plan_id: String::new(),
             metadata: test_job().metadata,
             acquisition: AcquisitionRequest {
                 source_scope: SourceScope::SingleMedia,
@@ -639,6 +666,25 @@ mod tests {
             },
         };
 
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &request.metadata,
+            request.metadata.source_type.unwrap_or_default(),
+        );
+        request.expected_plan_id = AcquisitionPlanner::plan_with_policy(
+            &graph,
+            &request.acquisition,
+            (&manager.settings.get_settings()).into(),
+        )
+        .unwrap()
+        .id;
+        let mut stale_request = request.clone();
+        stale_request.expected_plan_id = "stale-plan".into();
+        assert!(manager
+            .start_download(stale_request)
+            .await
+            .unwrap_err()
+            .contains("plan changed"));
+        assert!(manager.get_active_job().await.is_none());
         let first_manager = manager.clone();
         let first_request = request.clone();
         let second_manager = manager.clone();

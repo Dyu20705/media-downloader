@@ -135,11 +135,12 @@ export const App: React.FC = () => {
     () => metadata ? buildAcquisitionRequest() : null,
     [metadata, buildAcquisitionRequest],
   );
-  const { plan, isPlanning, planningError } = useAcquisitionPlan(metadata, acquisitionRequest);
+  const { plan, isPlanning, planningError } = useAcquisitionPlan(metadata, acquisitionRequest, settings);
 
   const handleStartDownload = useCallback(() => {
     if (!metadata || !url || !acquisitionRequest || !plan) return;
     startDownload({
+      expectedPlanId: plan.id,
       metadata,
       acquisition: acquisitionRequest,
     });

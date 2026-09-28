@@ -74,9 +74,10 @@ pub async fn analyze_media(
 pub async fn plan_acquisition(
     metadata: MediaMetadata,
     acquisition: AcquisitionRequest,
+    state: State<'_, AppState>,
 ) -> Result<AcquisitionPlan, String> {
     let graph = MediaGraph::build_source_graph(&metadata, metadata.source_type.unwrap_or_default());
-    AcquisitionPlanner::plan(&graph, &acquisition)
+    AcquisitionPlanner::plan_with_policy(&graph, &acquisition, (&state.settings.get_settings()).into())
 }
 
 #[tauri::command]
@@ -92,7 +93,7 @@ pub async fn build_command(
         &request.metadata,
         request.metadata.source_type.unwrap_or_default(),
     );
-    let plan = AcquisitionPlanner::plan(&graph, &request.acquisition)?;
+    let plan = AcquisitionPlanner::plan_with_policy(&graph, &request.acquisition, (&settings).into())?;
     let compiled = compile_acquisition_args(
         &plan,
         &request.acquisition,

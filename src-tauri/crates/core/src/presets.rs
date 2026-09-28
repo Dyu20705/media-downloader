@@ -60,6 +60,8 @@ pub fn compile_acquisition_args(
         });
     }
     let mut args = vec![
+        "--ignore-config".to_string(),
+        "--no-simulate".to_string(),
         "--newline".to_string(),
         "--progress".to_string(),
         "--no-warnings".to_string(),
@@ -124,16 +126,16 @@ pub fn compile_acquisition_args(
         }
     }
 
-    if settings.embed_metadata {
+    if plan.post_process.embed_metadata {
         args.push("--embed-metadata".to_string());
     }
-    if settings.embed_thumbnail {
+    if plan.post_process.embed_thumbnail {
         args.push("--embed-thumbnail".to_string());
     }
-    if settings.embed_chapters && !is_audio_only {
+    if plan.post_process.embed_chapters && !is_audio_only {
         args.push("--embed-chapters".to_string());
     }
-    match settings.sponsor_block_mode {
+    match plan.post_process.sponsor_block_mode {
         crate::types::SponsorBlockMode::MarkChapters => {
             args.extend(["--sponsorblock-mark".to_string(), "all".to_string()]);
         }
@@ -146,7 +148,10 @@ pub fn compile_acquisition_args(
     if !plan.selected_streams.subtitle_languages.is_empty() && !is_audio_only {
         args.push("--sub-langs".to_string());
         args.push(plan.selected_streams.subtitle_languages.join(","));
-        if matches!(settings.subtitle_mode, crate::types::SubtitleMode::Embed) {
+        if matches!(
+            plan.post_process.subtitle_mode,
+            crate::types::SubtitleMode::Embed
+        ) {
             args.push("--embed-subs".to_string());
         } else {
             args.push("--write-subs".to_string());

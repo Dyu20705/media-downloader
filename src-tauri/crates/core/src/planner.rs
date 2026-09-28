@@ -2,15 +2,79 @@ use sha2::{Digest, Sha256};
 
 use crate::types::{
     AcquisitionOperation, AcquisitionPlan, AcquisitionRequest, AudioStreamSpec, OutputProfile,
-    PlanRequirement, PlanWarning, PlannedArtifact, ProcessingClass, ProcessingPlan,
-    SelectedStreams, SizeEstimate, SourceMediaGraph, SourceSummary, VideoStreamSpec,
+    PlanRequirement, PlanWarning, PlannedArtifact, PostProcessPolicy, ProcessingClass,
+    ProcessingPlan, SelectedStreams, SizeEstimate, SourceMediaGraph, SourceSummary,
+    VideoStreamSpec,
 };
 
-pub const PLAN_VERSION: u32 = 1;
+pub const PLAN_VERSION: u32 = 2;
 
 pub struct AcquisitionPlanner;
 
 impl AcquisitionPlanner {
+    pub fn plan_with_policy(
+        source: &SourceMediaGraph,
+        request: &AcquisitionRequest,
+        policy: PostProcessPolicy,
+    ) -> Result<AcquisitionPlan, String> {
+        let mut plan = Self::plan(source, request)?;
+        let sidecar = matches!(
+            plan.operation,
+            AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
+        );
+        if !sidecar {
+            plan.post_process = policy;
+            let policy = &plan.post_process;
+            for (enabled, step) in [
+                (policy.embed_metadata, "Embed source metadata"),
+                (policy.embed_thumbnail, "Embed cover artwork"),
+                (
+                    policy.embed_chapters && !plan.output.audio_only,
+                    "Embed chapters",
+                ),
+                (
+                    policy.subtitle_mode == crate::types::SubtitleMode::Embed
+                        && !plan.selected_streams.subtitle_languages.is_empty(),
+                    "Embed selected subtitles",
+                ),
+                (
+                    policy.sponsor_block_mode != crate::types::SponsorBlockMode::Off,
+                    "Apply SponsorBlock policy",
+                ),
+            ] {
+                if enabled {
+                    plan.processing.steps.push(step.into());
+                    plan.processing.requires_ffmpeg = true;
+                }
+            }
+            if policy.sponsor_block_mode == crate::types::SponsorBlockMode::RemoveSegments {
+                plan.warnings.push(PlanWarning { code: "CONTENT_REMOVAL".into(), message: "SponsorBlock removes source segments. Output duration is content-dependent.".into() });
+            }
+        }
+        plan.requirements = vec![PlanRequirement {
+            code: "YT_DLP".into(),
+            message: "yt-dlp is required for acquisition.".into(),
+        }];
+        if plan.processing.requires_ffmpeg {
+            plan.requirements.push(PlanRequirement {
+                code: "FFMPEG".into(),
+                message: "FFmpeg is required for the planned processing.".into(),
+            });
+        }
+        if !matches!(plan.operation, AcquisitionOperation::SubtitlesOnly) {
+            plan.requirements.push(PlanRequirement {
+                code: "FFPROBE".into(),
+                message: "FFprobe is required for artifact verification.".into(),
+            });
+        }
+        let bytes = serde_json::to_vec(&plan).map_err(|e| format!("Cannot serialize plan: {e}"))?;
+        plan.id = format!(
+            "plan-v{PLAN_VERSION}-{}",
+            &hex::encode(Sha256::digest(bytes))[..20]
+        );
+        Ok(plan)
+    }
+
     pub fn plan(
         source: &SourceMediaGraph,
         request: &AcquisitionRequest,
@@ -41,6 +105,7 @@ impl AcquisitionPlanner {
         ) {
             let thumbnail = matches!(request.operation, AcquisitionOperation::ThumbnailOnly);
             return Ok(AcquisitionPlan {
+                post_process: PostProcessPolicy::default(),
                 time_range_ms: None,
                 id: stable_plan_id(source, request),
                 version: PLAN_VERSION,
@@ -194,6 +259,7 @@ impl AcquisitionPlanner {
         };
 
         Ok(AcquisitionPlan {
+            post_process: PostProcessPolicy::default(),
             time_range_ms: match request.operation {
                 AcquisitionOperation::Clip { start_ms, end_ms } => Some([start_ms, end_ms]),
                 _ => None,
@@ -810,6 +876,35 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "-f" || arg == "--embed-thumbnail"));
         }
+    }
+
+    #[test]
+    fn policy_changes_identity_and_compiler_uses_reviewed_policy() {
+        let source = source_graph();
+        let request = request(OutputProfile::BestSource, AcquisitionOperation::EntireMedia);
+        let first =
+            AcquisitionPlanner::plan_with_policy(&source, &request, PostProcessPolicy::default())
+                .unwrap();
+        let policy = PostProcessPolicy {
+            embed_metadata: true,
+            sponsor_block_mode: crate::types::SponsorBlockMode::RemoveSegments,
+            ..Default::default()
+        };
+        let changed = AcquisitionPlanner::plan_with_policy(&source, &request, policy).unwrap();
+        assert_ne!(first.id, changed.id);
+        assert!(changed.warnings.iter().any(|w| w.code == "CONTENT_REMOVAL"));
+        assert!(changed.requirements.iter().any(|r| r.code == "FFPROBE"));
+        let args = crate::presets::compile_acquisition_args(
+            &first,
+            &request,
+            &source.source_url,
+            &crate::types::AppSettings::default(),
+        )
+        .unwrap()
+        .arguments;
+        assert!(!args
+            .iter()
+            .any(|a| a == "--embed-thumbnail" || a == "--embed-metadata"));
     }
 
     #[test]
