@@ -1,18 +1,18 @@
 # Quality Transparency & Download Plan Design
 
-Status: **Slice 1 implemented; Slice 2 next**
+Status: **Slice 2 complete — canonical plan, pre-download presentation, verified actual output, and diff implemented**
 Owner: media-downloader
-Target branch: `feat/quality-transparency-v1`
+Target branch: `feat/canonical-acquisition-plan`
 
 ## 1. Problem
 
-The application already analyzes media, exposes presets, downloads through yt-dlp/FFmpeg, and verifies the resulting file. However, the UI does not yet make the relationship between **source quality**, **selected preset**, **processing required**, and **verified output** explicit.
+The application analyzes media, accepts an operation and output profile, downloads through yt-dlp/FFmpeg, and verifies the resulting file. The quality-transparency layer makes the relationship between **source quality**, **requested behavior**, **processing required**, and **verified output** explicit.
 
 This creates several avoidable UX problems:
 
 - A preset name such as `MP3 320 kbps` can be interpreted as a quality upgrade even when the source is lower-bitrate lossy audio.
 - A FLAC output can be interpreted as a lossless *source*, although transcoding AAC/Opus to FLAC cannot restore information already discarded upstream.
-- The user cannot easily tell whether a selected preset preserves streams, only remuxes/merges them, or requires re-encoding.
+- Without the plan, the user cannot tell whether a requested profile preserves streams, only remuxes/merges them, or requires re-encoding.
 - Requested quality and actual downloaded quality can diverge because of extractor availability, codec/container compatibility, or platform constraints.
 
 The product should answer three questions clearly:
@@ -51,7 +51,7 @@ The media streams and metadata reported by the extractor before preset-specific 
 
 ### Planned output
 
-The best current description of the output implied by the selected preset and resolver decision. It is a plan, not a guarantee.
+The best current description of the output implied by the selected operation/profile and resolver decision. It is a plan, not a guarantee.
 
 ### Actual output
 
@@ -69,7 +69,7 @@ Lower-cost processing should be preferred when it satisfies the requested intent
 
 ## 4. UX model
 
-After Slice 2 provides an authoritative normalized backend plan, Slice 3 may expose a `DownloadPlanCard` below the format and quality controls. The frontend must not infer this plan itself.
+The backend now provides an authoritative normalized `AcquisitionPlan`. The next UI slice should expose a `DownloadPlanCard` below the operation/profile controls. The frontend must not infer this plan itself.
 
 ### 4.1 Source section
 
@@ -144,69 +144,51 @@ If planned and actual properties differ materially, the UI should surface the di
 
 The frontend should consume a normalized backend classification rather than infer processing from preset names.
 
-Recommended UI-facing classification:
+Implemented UI-facing classification:
 
 ```ts
 export type ProcessingClass =
-  | 'source-preserved'
-  | 'merge-only'
-  | 'remux-only'
-  | 'audio-transcode'
-  | 'video-transcode'
-  | 'full-transcode'
-  | 'unknown';
+  | 'SOURCE_PRESERVED'
+  | 'MERGE_ONLY'
+  | 'REMUX_ONLY'
+  | 'AUDIO_TRANSCODE'
+  | 'VIDEO_TRANSCODE'
+  | 'FULL_TRANSCODE'
+  | 'UNKNOWN';
 ```
 
 Suggested mapping from resolver behavior:
 
 | Resolver behavior | UI classification | User-facing meaning |
 | --- | --- | --- |
-| direct/unchanged stream | `source-preserved` | No re-encoding |
-| separate streams multiplexed | `merge-only` | Streams preserved; container assembly only |
-| container changed without codec change | `remux-only` | No re-encoding |
-| audio codec conversion | `audio-transcode` | Audio quality can only stay equal or degrade relative to decoded source |
-| video codec conversion | `video-transcode` | Video is re-encoded |
-| both video and audio re-encoded | `full-transcode` | Both streams are re-encoded |
-| backend cannot determine plan | `unknown` | Do not speculate |
+| direct/unchanged stream | `SOURCE_PRESERVED` | No re-encoding |
+| separate streams multiplexed | `MERGE_ONLY` | Streams preserved; container assembly only |
+| container changed without codec change | `REMUX_ONLY` | No re-encoding |
+| audio codec conversion | `AUDIO_TRANSCODE` | Audio quality can only stay equal or degrade relative to decoded source |
+| video codec conversion | `VIDEO_TRANSCODE` | Video is re-encoded |
+| both video and audio re-encoded | `FULL_TRANSCODE` | Both streams are re-encoded |
+| backend cannot determine plan | `UNKNOWN` | Do not speculate |
 
 The backend remains authoritative because actual command construction and container compatibility decisions live there.
 
-## 6. Future backend contract (Slice 2)
+## 6. Implemented backend contract
 
-This contract is design guidance and is not implemented in Slice 1. A future Analyze response or preset-resolution command should expose a normalized plan. Exact naming can follow existing Rust/IPC conventions, but the data should be equivalent to:
+The `plan_acquisition` IPC command exposes the normalized `AcquisitionPlan` defined in `types.rs`. It contains stable identity, source summary, selected stream IDs, planned artifact, processing, estimated size, warnings, and requirements. Execution replans from the same request and compiles those exact selected IDs rather than independently resolving quality.
 
 ```ts
-interface DownloadPlan {
-  source: {
-    video?: StreamSummary;
-    audio?: StreamSummary;
-    container?: string;
-    estimatedBytes?: number;
-  };
-  output: {
-    video?: StreamSummary;
-    audio?: StreamSummary;
-    container?: string;
-    estimatedBytes?: number;
-  };
-  processing: {
-    class: ProcessingClass;
-    videoReencoded: boolean | null;
-    audioReencoded: boolean | null;
-    explanation?: string;
-  };
-  warnings: string[];
-}
-
-interface StreamSummary {
-  formatId?: string;
-  codec?: string;
-  bitrateKbps?: number;
-  width?: number;
-  height?: number;
-  fps?: number;
-  hdr?: boolean;
-  language?: string;
+interface AcquisitionPlan {
+  id: string;
+  version: number;
+  source: SourceSummary;
+  scope: SourceScope;
+  operation: AcquisitionOperation;
+  outputProfile: OutputProfile;
+  selectedStreams: SelectedStreams;
+  output: PlannedArtifact;
+  processing: { class: ProcessingClass; requiresFfmpeg: boolean; steps: string[] };
+  estimatedSize?: { bytes: number; confidence: string } | null;
+  warnings: Array<{ code: string; message: string }>;
+  requirements: Array<{ code: string; message: string }>;
 }
 ```
 
@@ -248,18 +230,19 @@ Required message:
 
 ### Frontend
 
-- `src/components/FormatSelector.tsx`
-  - preset intent and concise quality guidance
+- `src/components/AcquisitionControls.tsx`
+  - independent operation and output-profile intent with concise quality guidance
 - `src/components/MediaSummaryCard.tsx`
   - source identity remains here; avoid duplicating title/uploader information in the plan
-- future `src/components/DownloadPlanCard.tsx` (Slice 3, only after Slice 2)
+- `src/components/DownloadPlanCard.tsx`
   - consume the normalized backend plan
-  - source stream summary
-  - planned output summary
-  - processing classification
-  - warnings for transcoding
+  - selected source stream presentation keyed by the authoritative plan stream IDs
+  - planned output, processing class/steps, estimates, requirements, and warnings
+- `src/components/PlanActualComparison.tsx`
+  - verified actual-output presentation
+  - material plan-versus-actual comparison where both values are known
 - `src/App.tsx`
-  - owns analyzed metadata + selected preset + normalized plan state
+  - owns analyzed metadata + selected operation/profile + normalized plan state
 
 ### Rust core
 
@@ -305,7 +288,7 @@ A failed verification must not be displayed as a verified actual output.
 
 - Do not communicate quality state using color alone.
 - Warnings require textual labels such as `Transcode` or `No re-encoding`.
-- Keep preset cards concise; longer explanations belong in contextual guidance or the plan card.
+- Keep operation/profile choices concise; longer explanations belong in contextual guidance or the plan card.
 - Avoid marketing terms such as `lossless quality`, `studio quality`, or `high-quality 320 kbps` unless they describe verified source properties accurately.
 
 ## 12. Testing strategy
@@ -341,7 +324,7 @@ Confirm that the pre-download plan matches the resolver and that post-download a
 
 ## 13. Incremental implementation plan
 
-### Slice 1 — preset semantics (implemented in this branch)
+### Foundation — preset semantics (implemented)
 
 - Clarify Best Audio source-preservation intent.
 - Clarify MP3 as a compatibility-oriented lossy transcode.
@@ -349,20 +332,19 @@ Confirm that the pre-download plan matches the resolver and that post-download a
 - Add contextual quality note to the selected audio preset.
 - Update README wording.
 
-### Slice 2 — normalized backend download plan (NEXT)
+### Slice 1 — canonical acquisition plan (implemented)
 
-- Define the Rust `DownloadPlan`/`ProcessingKind` contract first.
-- Make one backend resolver return both execution arguments and the normalized `DownloadPlan`; do not maintain a second format-selection heuristic.
-- Cover source-preserved, merge, remux, audio/video/full transcode, and insufficient-metadata → `Unknown` with unit tests before UI work.
-- Add `warnings: Vec<String>` and preserve exact selected stream identity when available.
-- Expose the normalized plan through Tauri IPC only after resolver tests are green.
+- Rust owns `AcquisitionRequest`, `AcquisitionPlan`, and `ProcessingClass`.
+- One planner selects streams, expected output, processing, estimates, warnings, and requirements.
+- Download execution compiles exact stream IDs from that plan.
+- `plan_acquisition` exposes the normalized plan through typed Tauri IPC.
 
-### Slice 3 — pre-download `DownloadPlanCard` (after Slice 2)
+### Slice 2 — pre-download plan presentation (implemented)
 
 - Render source, planned output, and processing.
-- Refresh plan when preset/quality selection changes.
+- Refresh plan when operation/profile/quality selection changes.
 
-### Slice 4 — verified actual output (after Slice 3)
+### Slice 2 completion — verified actual output and diff (implemented)
 
 - Map verifier output to `Actual output` UI.
 - Surface material plan-vs-actual differences.

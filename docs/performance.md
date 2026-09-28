@@ -41,5 +41,5 @@ if last_progress_emit.elapsed() >= Duration::from_millis(250) {
    - `MediaInfoModal` (~8.7 KiB)
    - `HelpCheatsheetModal` (~7.6 KiB)
    - `DownloadHistoryModal` (~4.0 KiB)
-2. **Zero Polling**: IPC subscriptions use SSE or Tauri event callbacks only when a download is actively running.
+2. **Bounded Polling**: React polls active-job state every 400 ms only while a download is running; Rust coalesces process telemetry to 4 Hz.
 3. **No Heavy Third-Party Component Suites**: Clean Tailwind styling without heavy runtime CSS-in-JS libraries.
