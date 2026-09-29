@@ -270,3 +270,55 @@ fn subtitle_preferences_are_visible_in_plan_identity_and_do_not_override_explici
             .any(|a| a == "--sub-langs")
     );
 }
+
+#[test]
+fn source_audio_profiles_only_produce_executable_extraction_formats() {
+    for profile in [OutputProfile::BestSource, OutputProfile::Small] {
+        for (codec, ext, container, encoder) in [
+            ("mp4a.40.5", "m4a", "m4a", "m4a"),
+            ("mp4a.40.29", "aac", "aac", "aac"),
+            ("AAC", "mp4", "m4a", "m4a"),
+            ("opus", "webm", "opus", "opus"),
+            ("vorbis", "webm", "ogg", "vorbis"),
+            ("flac", "flac", "flac", "flac"),
+            ("mp3", "mp3", "mp3", "mp3"),
+        ] {
+            let graph = source(vec![json!({
+                "format_id":"audio","ext":ext,"vcodec":"none","acodec":codec
+            })]);
+            let plan = AcquisitionPlanner::plan(
+                &graph,
+                &request(profile, AcquisitionOperation::AudioOnly),
+            )
+            .unwrap();
+            assert_eq!(plan.output.container, container, "{codec}");
+            assert_eq!(plan.output.audio_codec.as_deref(), Some(codec));
+            assert_eq!(
+                value_after(&compile(&plan), "--audio-format"),
+                Some(encoder)
+            );
+        }
+    }
+}
+
+#[test]
+fn unsupported_preserved_audio_is_rejected_before_a_plan_is_presented() {
+    let graph = source(vec![
+        json!({"format_id":"audio","ext":"mka","vcodec":"none","acodec":"dts"}),
+    ]);
+    for profile in [OutputProfile::BestSource, OutputProfile::Small] {
+        let error =
+            AcquisitionPlanner::plan(&graph, &request(profile, AcquisitionOperation::AudioOnly))
+                .unwrap_err();
+        assert!(
+            error.contains("Source-preserving audio extraction"),
+            "{error}"
+        );
+    }
+    for profile in [OutputProfile::Universal, OutputProfile::Editing] {
+        let plan =
+            AcquisitionPlanner::plan(&graph, &request(profile, AcquisitionOperation::AudioOnly))
+                .unwrap();
+        assert!(value_after(&compile(&plan), "--audio-format").is_some());
+    }
+}

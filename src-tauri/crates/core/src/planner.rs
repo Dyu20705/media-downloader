@@ -1,3 +1,4 @@
+use crate::audio_formats::{is_aac, source_audio_container};
 use sha2::{Digest, Sha256};
 
 use crate::types::{
@@ -27,6 +28,7 @@ impl AcquisitionPlanner {
             plan.transforms.push(T::Merge);
         }
         if plan.output.audio_only {
+            crate::audio_formats::extraction_format(&plan.output.container)?;
             plan.transforms.push(T::ExtractAudio {
                 format: plan.output.container.clone(),
             });
@@ -280,7 +282,7 @@ impl AcquisitionPlanner {
         }
 
         let (container, video_codec, audio_codec, processing_class) =
-            planned_output(source, request, selected_video, selected_audio);
+            planned_output(source, request, selected_video, selected_audio)?;
         let requires_ffmpeg = processing_class != ProcessingClass::SourcePreserved
             || matches!(request.operation, AcquisitionOperation::Clip { .. })
             || audio_only
@@ -577,15 +579,17 @@ fn select_audio<'a>(
     }
 }
 
+type OutputSpec = (String, Option<String>, Option<String>, ProcessingClass);
+
 fn planned_output(
     source: &SourceMediaGraph,
     request: &AcquisitionRequest,
     video: Option<&VideoStreamSpec>,
     audio: Option<&AudioStreamSpec>,
-) -> (String, Option<String>, Option<String>, ProcessingClass) {
+) -> Result<OutputSpec, String> {
     let audio_only = matches!(request.operation, AcquisitionOperation::AudioOnly);
     if audio_only {
-        return match request.output_profile {
+        return Ok(match request.output_profile {
             OutputProfile::Universal => (
                 "mp3".to_string(),
                 None,
@@ -608,15 +612,20 @@ fn planned_output(
             ),
             _ => {
                 let codec = audio.map(|stream| stream.codec.clone());
-                let container = audio_container(codec.as_deref());
+                let source_container = audio.and_then(|a| format_ext(source, &a.stream_id));
+                let container = source_audio_container(
+                    codec.as_deref().ok_or("Missing source audio codec")?,
+                    source_container.as_deref(),
+                )?
+                .to_string();
                 (container, None, codec, ProcessingClass::SourcePreserved)
             }
-        };
+        });
     }
 
     let source_video_codec = video.map(|stream| stream.codec.clone());
     let source_audio_codec = audio.map(|stream| stream.codec.clone());
-    match request.output_profile {
+    Ok(match request.output_profile {
         OutputProfile::Universal | OutputProfile::Editing => {
             let video_transcode = video.is_some_and(|stream| !is_h264(&stream.codec));
             let audio_transcode = audio.is_some_and(|stream| !is_aac(&stream.codec));
@@ -662,7 +671,7 @@ fn planned_output(
                 },
             )
         }
-    }
+    })
 }
 
 fn streams_need_merge(video: Option<&VideoStreamSpec>, audio: Option<&AudioStreamSpec>) -> bool {
@@ -689,26 +698,9 @@ fn format_has_audio(source: &SourceMediaGraph, stream_id: &str) -> bool {
     })
 }
 
-fn audio_container(codec: Option<&str>) -> String {
-    match codec.unwrap_or_default().to_ascii_lowercase().as_str() {
-        "opus" => "opus",
-        "vorbis" => "ogg",
-        "aac" | "mp4a" | "mp4a.40.2" => "m4a",
-        "flac" => "flac",
-        "mp3" => "mp3",
-        _ => "mka",
-    }
-    .to_string()
-}
-
 fn is_h264(codec: &str) -> bool {
     let codec = codec.to_ascii_lowercase();
     codec.starts_with("avc1") || codec == "h264"
-}
-
-fn is_aac(codec: &str) -> bool {
-    let codec = codec.to_ascii_lowercase();
-    codec.starts_with("mp4a") || codec == "aac"
 }
 
 fn processing_steps(class: ProcessingClass) -> Vec<String> {

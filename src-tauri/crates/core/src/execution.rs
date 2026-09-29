@@ -157,13 +157,7 @@ pub fn compile_acquisition_args(
                 args.extend(["--remux-video".into(), container.clone()])
             }
             PlannedTransform::ExtractAudio { format } => {
-                let encoder = match format.as_str() {
-                    "ogg" => "vorbis",
-                    "mka" => {
-                        return Err("Source audio codec has no supported extraction format".into())
-                    }
-                    other => other,
-                };
+                let encoder = crate::audio_formats::extraction_format(format)?;
                 args.extend(["-x".into(), "--audio-format".into(), encoder.into()]);
                 if format == "mp3" {
                     args.extend(["--audio-quality".into(), "0".into()]);

@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod archive;
+mod audio_formats;
 pub mod deduplication;
 pub mod diagnostics;
 pub mod download_manager;
