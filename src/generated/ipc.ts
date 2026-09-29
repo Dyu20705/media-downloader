@@ -39,7 +39,7 @@ export type AcquisitionPlan = { transforms: Array<PlannedTransform>, includeAuto
 
 export type PlannedTransform = { "type": "MERGE" } | { "type": "REMUX", container: string, } | { "type": "EXTRACT_AUDIO", format: string, } | { "type": "TRANSCODE_VIDEO", codec: string, } | { "type": "TRANSCODE_AUDIO", codec: string, } | { "type": "TRIM", startMs: bigint, endMs: bigint, };
 
-export type PostProcessPolicy = { embedMetadata: boolean, embedThumbnail: boolean, embedChapters: boolean, subtitleMode: SubtitleMode, sponsorBlockMode: SponsorBlockMode, };
+export type PostProcessPolicy = { preferredSubtitleLanguage: string, embedMetadata: boolean, embedThumbnail: boolean, embedChapters: boolean, subtitleMode: SubtitleMode, sponsorBlockMode: SponsorBlockMode, };
 
 export type MediaSourceType = "YT_DLP_EXTRACTOR" | "YT_DLP_GENERIC" | "DIRECT_FILE" | "HLS" | "DASH" | "UNSUPPORTED" | "INACCESSIBLE";
 

@@ -183,16 +183,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {form.subtitleMode && form.subtitleMode !== 'none' && (
               <div className="pt-1.5 space-y-1">
                 <label htmlFor="settings-sub-lang" className="block text-[11px] text-zinc-400 font-mono">
-                  Preferred Languages (yt-dlp regex / comma-separated)
+                  Preferred languages (patterns / comma-separated)
                 </label>
                 <input
                   id="settings-sub-lang"
                   type="text"
-                  placeholder="en.*,en (or 'all' for all languages)"
-                  value={form.preferredSubtitleLanguage || 'en'}
+                  placeholder="en.*,ja or all,-live_chat"
+                  value={form.preferredSubtitleLanguage ?? 'en'}
                   onChange={(e) => setForm({ ...form, preferredSubtitleLanguage: e.target.value })}
                   className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-200 focus:border-blue-500"
                 />
+                <p className="text-[11px] text-zinc-500">Applied to video, clip and chapter downloads. Patterns are resolved to available manual tracks in the plan; an empty preference uses en. Use all or -language exclusions. Lookaround and backreferences are not supported.</p>
               </div>
             )}
           </div>

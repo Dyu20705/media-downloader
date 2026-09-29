@@ -71,7 +71,26 @@ impl AcquisitionPlanner {
         request: &AcquisitionRequest,
         policy: PostProcessPolicy,
     ) -> Result<AcquisitionPlan, String> {
-        let mut plan = Self::plan(source, request)?;
+        let mut effective_request = request.clone();
+        let use_preference = matches!(
+            request.operation,
+            AcquisitionOperation::EntireMedia
+                | AcquisitionOperation::Clip { .. }
+                | AcquisitionOperation::Chapter { .. }
+        ) && policy.subtitle_mode != crate::types::SubtitleMode::None
+            && request.track_selection.subtitle_languages.is_empty();
+        if use_preference {
+            effective_request.track_selection.subtitle_languages =
+                crate::subtitle_selection::resolve_subtitle_preference(
+                    &policy.preferred_subtitle_language,
+                    &source.subtitle_streams,
+                    request.track_selection.include_auto_subtitles,
+                )?;
+        }
+        let mut plan = Self::plan(source, &effective_request)?;
+        if use_preference && plan.selected_streams.subtitle_languages.is_empty() {
+            plan.warnings.push(PlanWarning { code: "SUBTITLE_PREFERENCE_UNAVAILABLE".into(), message: format!("No available subtitle tracks match preference {:?}; no subtitles will be downloaded.", policy.preferred_subtitle_language) });
+        }
         let sidecar = matches!(
             plan.operation,
             AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
@@ -100,6 +119,14 @@ impl AcquisitionPlanner {
                     plan.processing.steps.push(step.into());
                     plan.processing.requires_ffmpeg = true;
                 }
+            }
+            if policy.subtitle_mode == crate::types::SubtitleMode::DownloadSeparate
+                && !plan.selected_streams.subtitle_languages.is_empty()
+                && !plan.output.audio_only
+            {
+                plan.processing
+                    .steps
+                    .push("Save selected subtitles alongside the media".into());
             }
             if policy.sponsor_block_mode == crate::types::SponsorBlockMode::RemoveSegments {
                 plan.warnings.push(PlanWarning { code: "CONTENT_REMOVAL".into(), message: "SponsorBlock removes source segments. Output duration is content-dependent.".into() });

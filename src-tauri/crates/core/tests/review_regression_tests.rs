@@ -153,3 +153,120 @@ fn combined_fallback_respects_explicit_audio_language() {
     let plan = AcquisitionPlanner::plan(&graph, &req).unwrap();
     assert_eq!(value_after(&compile(&plan), "-f"), Some("combined-ja"));
 }
+
+fn with_subtitles() -> SourceMediaGraph {
+    let mut graph = source(vec![combined()]);
+    graph.subtitle_streams = [
+        ("en", false),
+        ("en-US", false),
+        ("ja", false),
+        ("live_chat", false),
+        ("fr", true),
+        ("en", true),
+    ]
+    .into_iter()
+    .map(|(language, is_auto)| SubtitleTrack {
+        language: language.into(),
+        is_auto: Some(is_auto),
+        ext: Some("vtt".into()),
+        ..Default::default()
+    })
+    .collect();
+    graph
+}
+
+#[test]
+fn ordinary_video_subtitle_settings_resolve_into_concrete_plan_tracks() {
+    let graph = with_subtitles();
+    for operation in [
+        AcquisitionOperation::EntireMedia,
+        AcquisitionOperation::Clip {
+            start_ms: 0,
+            end_ms: 1000,
+        },
+    ] {
+        for mode in [SubtitleMode::Embed, SubtitleMode::DownloadSeparate] {
+            let settings = AppSettings {
+                subtitle_mode: mode,
+                preferred_subtitle_language: "en.*,ja".into(),
+                ..Default::default()
+            };
+            let req = request(OutputProfile::BestSource, operation.clone());
+            let plan =
+                AcquisitionPlanner::plan_with_policy(&graph, &req, (&settings).into()).unwrap();
+            assert_eq!(
+                plan.selected_streams.subtitle_languages,
+                ["en", "en-US", "ja"]
+            );
+            let args = compile(&plan);
+            assert_eq!(value_after(&args, "--sub-langs"), Some("en,en-US,ja"));
+            assert!(args.iter().any(|a| a
+                == if mode == SubtitleMode::Embed {
+                    "--embed-subs"
+                } else {
+                    "--write-subs"
+                }));
+            assert!(!args.iter().any(|a| a == "en.*,ja"));
+        }
+    }
+}
+
+#[test]
+fn subtitle_preference_exclusions_and_auto_track_policy_are_resolved_before_compile() {
+    let graph = with_subtitles();
+    let resolve = |pattern, auto| {
+        ocmd_core::subtitle_selection::resolve_subtitle_preference(
+            pattern,
+            &graph.subtitle_streams,
+            auto,
+        )
+    };
+    assert_eq!(resolve("all,-live_chat,-en.*", false).unwrap(), ["ja"]);
+    assert_eq!(
+        resolve("all,-live_chat", true).unwrap(),
+        ["en", "en-US", "fr", "ja"]
+    );
+    assert_eq!(resolve("en", false).unwrap(), ["en"]);
+    assert_eq!(resolve("", false).unwrap(), ["en"]);
+    assert!(resolve("(?=en)en", false).is_err());
+    assert!(resolve("en,,ja", false).is_err());
+    assert!(resolve(&"e".repeat(2049), false).is_err());
+}
+
+#[test]
+fn subtitle_preferences_are_visible_in_plan_identity_and_do_not_override_explicit_tracks() {
+    let graph = with_subtitles();
+    let req = request(OutputProfile::BestSource, AcquisitionOperation::EntireMedia);
+    let mut policy = PostProcessPolicy {
+        subtitle_mode: SubtitleMode::Embed,
+        preferred_subtitle_language: "en".into(),
+        ..Default::default()
+    };
+    let first = AcquisitionPlanner::plan_with_policy(&graph, &req, policy.clone()).unwrap();
+    policy.preferred_subtitle_language = "ja".into();
+    let next = AcquisitionPlanner::plan_with_policy(&graph, &req, policy.clone()).unwrap();
+    assert_ne!(first.id, next.id);
+    assert_eq!(next.selected_streams.subtitle_languages, ["ja"]);
+    let mut explicit = req.clone();
+    explicit.track_selection.subtitle_languages = vec!["en-US".into()];
+    assert_eq!(
+        AcquisitionPlanner::plan_with_policy(&graph, &explicit, policy.clone())
+            .unwrap()
+            .selected_streams
+            .subtitle_languages,
+        ["en-US"]
+    );
+    policy.preferred_subtitle_language = "de".into();
+    let unavailable = AcquisitionPlanner::plan_with_policy(&graph, &req, policy.clone()).unwrap();
+    assert!(unavailable
+        .warnings
+        .iter()
+        .any(|w| w.code == "SUBTITLE_PREFERENCE_UNAVAILABLE"));
+    assert!(unavailable.selected_streams.subtitle_languages.is_empty());
+    policy.subtitle_mode = SubtitleMode::None;
+    assert!(
+        !compile(&AcquisitionPlanner::plan_with_policy(&graph, &req, policy).unwrap())
+            .iter()
+            .any(|a| a == "--sub-langs")
+    );
+}

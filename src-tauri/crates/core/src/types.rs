@@ -229,6 +229,8 @@ pub enum PlannedTransform {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PostProcessPolicy {
+    #[serde(default)]
+    pub preferred_subtitle_language: String,
     pub embed_metadata: bool,
     pub embed_thumbnail: bool,
     pub embed_chapters: bool,
@@ -239,6 +241,7 @@ pub struct PostProcessPolicy {
 impl From<&AppSettings> for PostProcessPolicy {
     fn from(settings: &AppSettings) -> Self {
         Self {
+            preferred_subtitle_language: settings.preferred_subtitle_language.clone(),
             embed_metadata: settings.embed_metadata,
             embed_thumbnail: settings.embed_thumbnail,
             embed_chapters: settings.embed_chapters,

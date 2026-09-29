@@ -121,8 +121,8 @@ export const App: React.FC = () => {
       outputProfile,
       trackSelection: {
         audioLanguage: null,
-        subtitleLanguages: subtitleLanguage ? [subtitleLanguage] : [],
-        includeAutoSubtitles: includeAutoSubtitles,
+        subtitleLanguages: operation.type === 'SUBTITLES_ONLY' && subtitleLanguage ? [subtitleLanguage] : [],
+        includeAutoSubtitles: operation.type === 'SUBTITLES_ONLY' && includeAutoSubtitles,
       },
       metadataPatch: null,
       duplicatePolicy: 'RENAME',

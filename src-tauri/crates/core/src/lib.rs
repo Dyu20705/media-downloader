@@ -17,6 +17,7 @@ pub mod recipe;
 pub mod recommendation_engine;
 pub mod settings;
 pub mod state_machine;
+pub mod subtitle_selection;
 pub mod tool_manager;
 pub mod tools;
 pub mod types;
