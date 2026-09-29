@@ -21,6 +21,11 @@ impl AcquisitionPlanner {
         use crate::types::PlannedTransform as T;
         let class = plan.processing.class;
         plan.transforms.clear();
+        if matches!(plan.operation, AcquisitionOperation::SubtitlesOnly) {
+            plan.transforms.push(T::ConvertSubtitles {
+                format: "vtt".into(),
+            });
+        }
         if plan.selected_streams.video_stream_id.is_some()
             && plan.selected_streams.audio_stream_id.is_some()
             && plan.selected_streams.video_stream_id != plan.selected_streams.audio_stream_id
@@ -219,20 +224,26 @@ impl AcquisitionPlanner {
                 },
                 processing: ProcessingPlan {
                     class: ProcessingClass::Unknown,
-                    requires_ffmpeg: thumbnail,
+                    requires_ffmpeg: true,
                     steps: vec![if thumbnail {
                         "Save thumbnail as JPEG"
                     } else {
-                        "Save selected WebVTT subtitle track"
+                        "Download the selected subtitle track and convert it to WebVTT"
                     }
                     .into()],
                 },
                 estimated_size: None,
                 warnings: vec![],
-                requirements: vec![PlanRequirement {
-                    code: "YT_DLP".into(),
-                    message: "yt-dlp required; thumbnail conversion also needs FFmpeg.".into(),
-                }],
+                requirements: vec![
+                    PlanRequirement {
+                        code: "YT_DLP".into(),
+                        message: "yt-dlp is required to download the selected sidecar.".into(),
+                    },
+                    PlanRequirement {
+                        code: "FFMPEG".into(),
+                        message: "FFmpeg is required for sidecar format conversion.".into(),
+                    },
+                ],
             });
         }
 

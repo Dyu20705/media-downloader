@@ -99,10 +99,23 @@ pub fn compile_acquisition_args(
                 "jpg".into(),
             ]);
         } else {
+            let format = plan
+                .transforms
+                .iter()
+                .find_map(|transform| match transform {
+                    PlannedTransform::ConvertSubtitles { format } => Some(format.as_str()),
+                    _ => None,
+                })
+                .ok_or("Subtitle plan is missing its conversion transform")?;
+            if format != "vtt" || plan.output.container != "vtt" {
+                return Err("Subtitle-only execution requires a WebVTT conversion plan".into());
+            }
             args.extend([
                 "--write-subs".into(),
                 "--sub-format".into(),
-                "vtt".into(),
+                "vtt/best".into(),
+                "--convert-subs".into(),
+                format.into(),
                 "--sub-langs".into(),
                 plan.selected_streams.subtitle_languages.join(","),
             ]);
@@ -143,6 +156,9 @@ pub fn compile_acquisition_args(
     let mut lossy = false;
     for transform in &plan.transforms {
         match transform {
+            PlannedTransform::ConvertSubtitles { format } => {
+                args.extend(["--convert-subs".into(), format.clone()])
+            }
             PlannedTransform::Merge => {
                 args.extend([
                     "--merge-output-format".into(),

@@ -322,3 +322,115 @@ fn unsupported_preserved_audio_is_rejected_before_a_plan_is_presented() {
         assert!(value_after(&compile(&plan), "--audio-format").is_some());
     }
 }
+
+#[test]
+fn subtitle_only_plan_declares_conversion_and_ffmpeg_preflight() {
+    let mut graph = with_subtitles();
+    graph.subtitle_streams[0].ext = Some("srt".into());
+    let mut req = request(
+        OutputProfile::BestSource,
+        AcquisitionOperation::SubtitlesOnly,
+    );
+    req.track_selection.subtitle_languages = vec!["en".into()];
+    for plan in [
+        AcquisitionPlanner::plan(&graph, &req).unwrap(),
+        AcquisitionPlanner::plan_with_policy(&graph, &req, PostProcessPolicy::default()).unwrap(),
+    ] {
+        assert_eq!(plan.output.container, "vtt");
+        assert!(plan.processing.requires_ffmpeg);
+        assert!(plan.requirements.iter().any(|r| r.code == "FFMPEG"));
+        assert!(plan
+            .transforms
+            .contains(&PlannedTransform::ConvertSubtitles {
+                format: "vtt".into()
+            }));
+        let args = compile(&plan);
+        assert_eq!(value_after(&args, "--sub-format"), Some("vtt/best"));
+        assert_eq!(value_after(&args, "--convert-subs"), Some("vtt"));
+    }
+}
+
+#[tokio::test]
+async fn srt_only_source_is_converted_to_the_promised_vtt_artifact_offline() {
+    for tool in ["yt-dlp", "ffmpeg"] {
+        let available = std::process::Command::new(tool)
+            .arg(if tool == "yt-dlp" {
+                "--version"
+            } else {
+                "-version"
+            })
+            .output()
+            .is_ok_and(|result| result.status.success());
+        if !available {
+            assert!(std::env::var_os("CI").is_none(), "CI requires {tool}");
+            eprintln!("Offline subtitle test skipped: install {tool}");
+            return;
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let srt = dir.path().join("source.srt");
+    std::fs::write(
+        &srt,
+        "1\n00:00:00,000 --> 00:00:01,000\nRegression caption\n",
+    )
+    .unwrap();
+    let info = json!({
+        "id":"srt-only", "title":"SRT only", "extractor":"generic", "extractor_key":"Generic",
+        "webpage_url":"https://example.com/srt-only", "url":"https://example.com/not-downloaded.mp4", "ext":"mp4",
+        "subtitles":{"en":[{"ext":"srt","url":url::Url::from_file_path(&srt).unwrap().as_str()}]}
+    });
+    let metadata = parse_ytdlp_json(&info.to_string(), "https://example.com/srt-only").unwrap();
+    let graph = MediaGraph::build_source_graph(&metadata, MediaSourceType::YtDlpExtractor);
+    let mut req = request(
+        OutputProfile::BestSource,
+        AcquisitionOperation::SubtitlesOnly,
+    );
+    req.track_selection.subtitle_languages = vec!["en".into()];
+    let plan =
+        AcquisitionPlanner::plan_with_policy(&graph, &req, PostProcessPolicy::default()).unwrap();
+    let mut args = compile_acquisition_args(
+        &plan,
+        &ExecutionContext::new(dir.path().to_str().unwrap(), &AppSettings::default()),
+    )
+    .unwrap()
+    .arguments;
+    assert_eq!(args.pop().as_deref(), Some(plan.source.url.as_str()));
+    let info_path = dir.path().join("source.info.json");
+    std::fs::write(&info_path, info.to_string()).unwrap();
+    // File URLs are enabled only in this offline fixture, never in production arguments.
+    args.extend([
+        "--enable-file-urls".into(),
+        "--load-info-json".into(),
+        info_path.to_string_lossy().into_owned(),
+    ]);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::process::Command::new("yt-dlp")
+            .kill_on_drop(true)
+            .args(args)
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        result.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let artifact = dir.path().join("artifact.en.vtt");
+    assert!(
+        artifact.exists(),
+        "{}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+    let actual = ocmd_core::media_verifier::verify_subtitle(&artifact)
+        .await
+        .unwrap();
+    assert_eq!(actual.container_format, "vtt");
+    assert!(ocmd_core::plan_verifier::verify_against_plan(&plan, &actual).conforms);
+    assert!(std::fs::read_to_string(artifact)
+        .unwrap()
+        .contains("Regression caption"));
+}

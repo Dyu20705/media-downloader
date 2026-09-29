@@ -220,6 +220,7 @@ pub enum PlannedTransform {
     Merge,
     Remux { container: String },
     ExtractAudio { format: String },
+    ConvertSubtitles { format: String },
     TranscodeVideo { codec: String },
     TranscodeAudio { codec: String },
     Trim { start_ms: u64, end_ms: u64 },
