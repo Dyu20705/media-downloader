@@ -41,6 +41,10 @@ impl MediaGraph {
 
                 if f.acodec.is_some() && f.acodec.as_deref() != Some("none") {
                     audio_streams.push(AudioStreamSpec {
+                        is_audio_only: f
+                            .vcodec
+                            .as_deref()
+                            .is_some_and(|codec| codec.eq_ignore_ascii_case("none")),
                         stream_id: f.format_id.clone(),
                         codec: f.acodec.clone().unwrap_or_else(|| "unknown".to_string()),
                         bitrate_kbps: f.abr.map(|b| b as u64),

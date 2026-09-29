@@ -7,7 +7,7 @@ use crate::types::{
     VideoStreamSpec,
 };
 
-pub const PLAN_VERSION: u32 = 2;
+pub const PLAN_VERSION: u32 = 3;
 
 pub struct AcquisitionPlanner;
 
@@ -208,12 +208,12 @@ impl AcquisitionPlanner {
         }
 
         let audio_only = matches!(request.operation, AcquisitionOperation::AudioOnly);
-        let selected_video = if audio_only {
+        let mut selected_video = if audio_only {
             None
         } else {
-            select_video(source, request)
+            select_video(source, request, false)
         };
-        let selected_audio = if !audio_only
+        let mut selected_audio = if !audio_only
             && selected_video.is_some_and(|video| format_has_audio(source, &video.stream_id))
         {
             selected_video.and_then(|video| {
@@ -223,8 +223,20 @@ impl AcquisitionPlanner {
                     .find(|audio| audio.stream_id == video.stream_id)
             })
         } else {
-            select_audio(source, request)
+            select_audio(source, request, !audio_only)
         };
+
+        let combined_fallback =
+            !audio_only && selected_audio.is_none() && !source.audio_streams.is_empty();
+        if combined_fallback {
+            selected_video = select_video(source, request, true);
+            selected_audio = selected_video.and_then(|video| {
+                source
+                    .audio_streams
+                    .iter()
+                    .find(|audio| audio.stream_id == video.stream_id)
+            });
+        }
 
         if let Some(wanted) = &request.track_selection.audio_language {
             if selected_audio.and_then(|a| a.language.as_ref()) != Some(wanted) {
@@ -250,6 +262,9 @@ impl AcquisitionPlanner {
                 .is_some_and(|(video, audio)| video.stream_id != audio.stream_id);
 
         let mut warnings = Vec::new();
+        if combined_fallback {
+            warnings.push(PlanWarning { code: "COMBINED_SOURCE_FALLBACK".into(), message: "No suitable audio-only format is available; use one combined video/audio source.".into() });
+        }
         if matches!(request.operation, AcquisitionOperation::Clip { .. }) {
             warnings.push(PlanWarning {
                 code: "FAST_CUT_BOUNDARIES".to_string(),
@@ -447,9 +462,27 @@ fn validate_request(source: &SourceMediaGraph, request: &AcquisitionRequest) -> 
 fn select_video<'a>(
     source: &'a SourceMediaGraph,
     request: &AcquisitionRequest,
+    combined_only: bool,
 ) -> Option<&'a VideoStreamSpec> {
+    let available = || {
+        source.video_streams.iter().filter(|video| {
+            let combined = format_has_audio(source, &video.stream_id);
+            (!combined_only || combined)
+                && (!combined
+                    || request
+                        .track_selection
+                        .audio_language
+                        .as_ref()
+                        .is_none_or(|wanted| {
+                            source.audio_streams.iter().any(|a| {
+                                a.stream_id == video.stream_id
+                                    && a.language.as_ref() == Some(wanted)
+                            })
+                        }))
+        })
+    };
     let eligible = || {
-        source.video_streams.iter().filter(|stream| {
+        available().filter(|stream| {
             request
                 .max_video_height
                 .is_none_or(|max_height| stream.height <= max_height)
@@ -469,12 +502,7 @@ fn select_video<'a>(
         }
         OutputProfile::BestSource | OutputProfile::Custom => eligible().max_by(video_quality_cmp),
     }
-    .or_else(|| {
-        source
-            .video_streams
-            .iter()
-            .min_by_key(|stream| stream.height)
-    })
+    .or_else(|| available().min_by_key(|stream| stream.height))
 }
 
 fn video_quality_cmp(left: &&VideoStreamSpec, right: &&VideoStreamSpec) -> std::cmp::Ordering {
@@ -488,6 +516,7 @@ fn video_quality_cmp(left: &&VideoStreamSpec, right: &&VideoStreamSpec) -> std::
 fn select_audio<'a>(
     source: &'a SourceMediaGraph,
     request: &AcquisitionRequest,
+    standalone_only: bool,
 ) -> Option<&'a AudioStreamSpec> {
     let language_matches = |stream: &&AudioStreamSpec| {
         request
@@ -496,7 +525,13 @@ fn select_audio<'a>(
             .as_ref()
             .is_none_or(|wanted| stream.language.as_ref() == Some(wanted))
     };
-    let candidates = || source.audio_streams.iter().filter(language_matches);
+    let candidates = || {
+        source
+            .audio_streams
+            .iter()
+            .filter(|s| !standalone_only || s.is_audio_only)
+            .filter(language_matches)
+    };
     let compatible = candidates()
         .filter(|stream| is_aac(&stream.codec))
         .max_by_key(|stream| stream.bitrate_kbps.unwrap_or(0));
@@ -751,6 +786,7 @@ mod tests {
                 },
             ],
             audio_streams: vec![AudioStreamSpec {
+                is_audio_only: true,
                 stream_id: "aac-128".to_string(),
                 codec: "mp4a.40.2".to_string(),
                 bitrate_kbps: Some(128),

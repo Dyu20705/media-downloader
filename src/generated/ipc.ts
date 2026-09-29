@@ -73,7 +73,11 @@ export type RecommendationConstraints = { maxFilesizeBytes?: number | null, minH
 
 export type VideoStreamSpec = { streamId: string, codec: string, profile?: string | null, width: number, height: number, fps?: number | null, bitrateKbps?: number | null, isHdr: boolean, dynamicRange?: string | null, aspectRatio?: string | null, filesizeApprox?: number | null, };
 
-export type AudioStreamSpec = { streamId: string, codec: string, bitrateKbps?: number | null, sampleRateHz?: number | null, channels?: number | null, language?: string | null, isDefault: boolean, filesizeApprox?: number | null, };
+export type AudioStreamSpec = { 
+/**
+ * True only when the source explicitly reports vcodec=none.
+ */
+isAudioOnly: boolean, streamId: string, codec: string, bitrateKbps?: number | null, sampleRateHz?: number | null, channels?: number | null, language?: string | null, isDefault: boolean, filesizeApprox?: number | null, };
 
 export type ThumbnailSpec = { url: string, width?: number | null, height?: number | null, id?: string | null, };
 

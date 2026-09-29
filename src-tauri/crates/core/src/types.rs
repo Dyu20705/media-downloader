@@ -490,6 +490,9 @@ pub struct VideoStreamSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioStreamSpec {
+    /// True only when the source explicitly reports vcodec=none.
+    #[serde(default)]
+    pub is_audio_only: bool,
     pub stream_id: String,
     pub codec: String,
     #[cfg_attr(test, ts(optional = nullable))]
