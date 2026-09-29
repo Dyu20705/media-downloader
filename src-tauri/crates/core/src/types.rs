@@ -218,12 +218,27 @@ pub struct AcquisitionPlan {
 )]
 pub enum PlannedTransform {
     Merge,
-    Remux { container: String },
-    ExtractAudio { format: String },
-    ConvertSubtitles { format: String },
-    TranscodeVideo { codec: String },
-    TranscodeAudio { codec: String },
-    Trim { start_ms: u64, end_ms: u64 },
+    Remux {
+        container: String,
+    },
+    ExtractAudio {
+        format: String,
+    },
+    ConvertSubtitles {
+        format: String,
+    },
+    TranscodeVideo {
+        codec: String,
+    },
+    TranscodeAudio {
+        codec: String,
+    },
+    Trim {
+        #[cfg_attr(test, ts(type = "number"))]
+        start_ms: u64,
+        #[cfg_attr(test, ts(type = "number"))]
+        end_ms: u64,
+    },
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]

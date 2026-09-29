@@ -37,7 +37,7 @@ export type PlanRequirement = { code: string, message: string, };
 
 export type AcquisitionPlan = { transforms: Array<PlannedTransform>, includeAutoSubtitles: boolean, postProcess: PostProcessPolicy, timeRangeMs?: [number, number] | null, id: string, version: number, source: SourceSummary, scope: SourceScope, operation: AcquisitionOperation, outputProfile: OutputProfile, selectedStreams: SelectedStreams, output: PlannedArtifact, processing: ProcessingPlan, estimatedSize?: SizeEstimate | null, warnings: Array<PlanWarning>, requirements: Array<PlanRequirement>, };
 
-export type PlannedTransform = { "type": "MERGE" } | { "type": "REMUX", container: string, } | { "type": "EXTRACT_AUDIO", format: string, } | { "type": "CONVERT_SUBTITLES", format: string, } | { "type": "TRANSCODE_VIDEO", codec: string, } | { "type": "TRANSCODE_AUDIO", codec: string, } | { "type": "TRIM", startMs: bigint, endMs: bigint, };
+export type PlannedTransform = { "type": "MERGE" } | { "type": "REMUX", container: string, } | { "type": "EXTRACT_AUDIO", format: string, } | { "type": "CONVERT_SUBTITLES", format: string, } | { "type": "TRANSCODE_VIDEO", codec: string, } | { "type": "TRANSCODE_AUDIO", codec: string, } | { "type": "TRIM", startMs: number, endMs: number, };
 
 export type PostProcessPolicy = { preferredSubtitleLanguage: string, embedMetadata: boolean, embedThumbnail: boolean, embedChapters: boolean, subtitleMode: SubtitleMode, sponsorBlockMode: SponsorBlockMode, };
 
