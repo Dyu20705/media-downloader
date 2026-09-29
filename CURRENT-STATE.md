@@ -25,9 +25,17 @@ Source metadata + request + semantic settings
   -> completed receipt or failed verification with retained artifact
 ```
 
-The plan contains embedding, subtitle and SponsorBlock policy. Settings changes invalidate frontend plans. Stale asynchronous planning responses cannot replace newer plans. Operational settings such as fragment concurrency do not choose output codecs.
+Plan version 3 contains embedding, subtitle and SponsorBlock policy. Settings changes invalidate frontend plans. Stale asynchronous planning responses cannot replace newer plans. Operational settings such as fragment concurrency do not choose output codecs.
 
 The execution compiler lives in `core/src/execution.rs`. The legacy preset compiler and duplicate job preset/subtitle/SponsorBlock fields were removed. Persisted defaults and recommendations still use preset names as a UI migration adapter, not as an execution authority.
+
+## Merge-review follow-up
+
+- Separate video can only merge with a format explicitly identified as audio-only. Without one, the planner selects a combined A/V source and exposes its actual resolution; it never compiles video-only + combined-A/V.
+- Saved subtitle preferences apply to Entire Media, Clip and Chapter. The backend resolves comma-separated patterns, all, and exclusions to concrete available tracks before hashing the plan. Missing matches produce a warning; invalid or unsupported patterns produce a planning error. The settings UI documents the supported regex subset and manual-track default.
+- Best Source/Small audio use shared codec-family and extraction-format mappings. AAC variants such as mp4a.40.5 are supported; raw AAC is retained where the source reports it. Unsupported preservation codecs are rejected during planning with a conversion-profile alternative, rather than producing an unexecutable mka plan.
+- Subtitle-only plans explicitly convert to WebVTT and preflight FFmpeg. Native VTT is preferred; other available subtitle formats can be converted.
+- Trim transform milliseconds now generate TypeScript number fields, consistent with the clip and plan JSON contract.
 
 ## Verification contract
 
@@ -84,8 +92,10 @@ Fast cuts are not frame-accurate. Multi-artifact subtitle jobs and split-all-cha
 
 Local Linux checks:
 
-- Core: 55 unit tests, 3 execution-contract tests, 7 integration tests, 9 tool-manager tests.
-- Frontend: 5 hook/component tests covering stale plans, settings invalidation, planning failure and backend-owned mismatch rendering.
+- Core: 55 unit tests, 3 execution-contract tests, 7 integration tests, 11 merge-review regression tests, 9 tool-manager tests (85 total).
+- Desktop: 6 integration tests.
+- The offline SRT-only fixture runs real yt-dlp and FFmpeg and validates the final artifact.en.vtt file. Local yt-dlp: 2026.08.25.233329. CI installs the managed catalog version, 2025.02.19; that remote run is still pending.
+- Frontend: 6 tests covering stale plans, settings invalidation, planning failure, backend-owned mismatch rendering and numeric millisecond IPC types.
 - Rust/TypeScript IPC DTOs are generated from Rust; a test fails if checked-in bindings drift. Regenerate with `npm run bindings`.
 - TypeScript checking, production Vite build, Rust formatting, Clippy and desktop Cargo checks are run before handoff.
 - CI is configured for Rust tests/Clippy on Linux, Windows and macOS, plus frontend tests/build. It has not been run remotely in this session. Unix shell-executable fixtures are Unix-only; archive and artifact-selection tests are portable.

@@ -177,9 +177,15 @@ fn with_subtitles() -> SourceMediaGraph {
 
 #[test]
 fn ordinary_video_subtitle_settings_resolve_into_concrete_plan_tracks() {
-    let graph = with_subtitles();
+    let mut graph = with_subtitles();
+    graph.chapters.push(MediaChapter {
+        title: "Opening".into(),
+        start_time: 0.0,
+        end_time: 1.0,
+    });
     for operation in [
         AcquisitionOperation::EntireMedia,
+        AcquisitionOperation::Chapter { chapter_index: 0 },
         AcquisitionOperation::Clip {
             start_ms: 0,
             end_ms: 1000,
