@@ -5,8 +5,7 @@ use tempfile::tempdir;
 use ocmd_core::diagnostics::DiagnosticsBuffer;
 use ocmd_core::tool_manager::{get_pinned_tool_spec, ToolManager, PINNED_TOOLS};
 #[cfg(unix)]
-use ocmd_core::types::AppSettings;
-use ocmd_core::types::ToolStatus;
+use ocmd_core::types::{AppSettings, ToolStatus};
 
 #[test]
 fn test_pinned_versions_catalog() {

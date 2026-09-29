@@ -90,14 +90,14 @@ Fast cuts are not frame-accurate. Multi-artifact subtitle jobs and split-all-cha
 
 ## Verification evidence
 
-Local Linux checks:
+Local Linux validation is separate from cross-platform CI. The results below describe the checked-in regression suite; GitHub Actions is authoritative for remote validation.
 
-- Core: 55 unit tests, 3 execution-contract tests, 7 integration tests, 11 merge-review regression tests, 9 tool-manager tests (85 total).
+- Core: 56 unit tests, 3 execution-contract tests, 7 integration tests, 11 merge-review regression tests, 9 tool-manager tests (86 total).
 - Desktop: 6 integration tests.
-- The offline SRT-only fixture runs real yt-dlp and FFmpeg and validates the final artifact.en.vtt file. Local yt-dlp: 2026.08.25.233329. CI installs the managed catalog version, 2025.02.19; that remote run is still pending.
+- The offline SRT-only fixture runs real yt-dlp and FFmpeg and validates the final artifact.en.vtt file. Local yt-dlp: 2026.08.25.233329. CI installs the managed catalog version, 2025.02.19.
 - Frontend: 6 tests covering stale plans, settings invalidation, planning failure, backend-owned mismatch rendering and numeric millisecond IPC types.
-- Rust/TypeScript IPC DTOs are generated from Rust; a test fails if checked-in bindings drift. Regenerate with `npm run bindings`.
+- Rust/TypeScript IPC DTOs are generated from Rust; a test fails if checked-in bindings drift, ignoring CRLF/LF differences. Regression coverage checks that type changes still fail comparison. Regenerate with `npm run bindings`.
 - TypeScript checking, production Vite build, Rust formatting, Clippy and desktop Cargo checks are run before handoff.
-- CI is configured for Rust tests/Clippy on Linux, Windows and macOS, plus frontend tests/build. It has not been run remotely in this session. Unix shell-executable fixtures are Unix-only; archive and artifact-selection tests are portable.
+- CI runs Rust tests/Clippy on Linux, Windows and macOS, plus frontend tests/build. A green matrix for the candidate commit is required before merge. See [GitHub Actions](https://github.com/Dyu20705/media-downloader/actions) for current results. Unix shell-executable fixtures are Unix-only; archive and artifact-selection tests are portable.
 
 These checks establish a development baseline, not a broad production-release claim.

@@ -1205,6 +1205,24 @@ mod bindings {
     use super::*;
     use ts_rs::TS;
 
+    fn normalize_binding_eol(content: &str) -> String {
+        content.replace("\r\n", "\n")
+    }
+
+    #[test]
+    fn binding_comparison_ignores_crlf_but_not_type_changes() {
+        let expected = "export type Milliseconds = number;\n";
+        assert_eq!(normalize_binding_eol(expected), expected);
+        assert_eq!(
+            normalize_binding_eol("export type Milliseconds = number;\r\n"),
+            expected
+        );
+        assert_ne!(
+            normalize_binding_eol("export type Milliseconds = bigint;\r\n"),
+            expected
+        );
+    }
+
     #[test]
     fn ipc_bindings_are_current() {
         let declarations = [
@@ -1287,7 +1305,9 @@ mod bindings {
             std::fs::write(&path, &output).unwrap();
         }
         assert_eq!(
-            std::fs::read_to_string(path).expect("Generate IPC bindings first"),
+            normalize_binding_eol(
+                &std::fs::read_to_string(path).expect("Generate IPC bindings first")
+            ),
             output,
             "Rust IPC types changed; regenerate TypeScript bindings"
         );
