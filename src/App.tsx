@@ -297,6 +297,7 @@ export const App: React.FC = () => {
           {downloadError && (
             <div className="mb-3 p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-xs text-red-300">
               {downloadError.userMessage}
+              {downloadError.technicalDetails && <p className="mt-1 text-xs">{downloadError.technicalDetails}</p>}
             </div>
           )}
 

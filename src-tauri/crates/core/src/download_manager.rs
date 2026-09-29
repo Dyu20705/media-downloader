@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::diagnostics::DiagnosticsBuffer;
+use crate::execution::compile_acquisition_args;
 use crate::media_verifier::{resolve_final_download_path, verify_and_inspect_media};
 use crate::path_validator::validate_and_ensure_directory;
 use crate::planner::AcquisitionPlanner;
-use crate::presets::compile_acquisition_args;
 use crate::process_runner::ProcessHandle;
 use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
 use crate::settings::SettingsManager;
@@ -91,7 +91,7 @@ impl DownloadManager {
                 "Acquisition plan changed. Review the updated plan before downloading.".into(),
             );
         }
-        for tool in required_tools(&plan) {
+        for tool in required_tools(&plan)? {
             self.tool_resolver.resolve_tool_with_settings(tool, Some(&current_settings))
                 .await.ok_or_else(|| format!("Required tool {tool} is unavailable. Install or repair it before downloading."))?;
         }
@@ -128,7 +128,7 @@ impl DownloadManager {
         }
         let compiled = compile_acquisition_args(
             &plan,
-            &crate::presets::ExecutionContext::new(
+            &crate::execution::ExecutionContext::new(
                 &acquisition.output_directory,
                 &current_settings,
             ),
@@ -152,8 +152,6 @@ impl DownloadManager {
             error_message: None,
             created_at: now_str,
             completed_at: None,
-            subtitle_options: None,
-            sponsor_block_mode: Some(current_settings.sponsor_block_mode),
             intent: None,
             recipe: None,
             fingerprint: None,
@@ -548,15 +546,16 @@ async fn run_final_transform(
     }
 }
 
-fn required_tools(plan: &crate::types::AcquisitionPlan) -> Vec<&'static str> {
-    let mut tools = vec!["yt-dlp"];
-    if plan.processing.requires_ffmpeg {
-        tools.push("ffmpeg");
-    }
-    if !matches!(plan.operation, AcquisitionOperation::SubtitlesOnly) {
-        tools.push("ffprobe");
-    }
-    tools
+fn required_tools(plan: &crate::types::AcquisitionPlan) -> Result<Vec<&'static str>, String> {
+    plan.requirements
+        .iter()
+        .map(|requirement| match requirement.code.as_str() {
+            "YT_DLP" => Ok("yt-dlp"),
+            "FFMPEG" => Ok("ffmpeg"),
+            "FFPROBE" => Ok("ffprobe"),
+            code => Err(format!("Unsupported plan requirement: {code}")),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -659,8 +658,6 @@ mod tests {
             error_message: None,
             created_at: "now".to_string(),
             completed_at: None,
-            subtitle_options: None,
-            sponsor_block_mode: None,
             intent: None,
             recipe: None,
             fingerprint: None,

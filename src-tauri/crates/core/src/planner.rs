@@ -356,6 +356,30 @@ impl AcquisitionPlanner {
 }
 
 fn validate_request(source: &SourceMediaGraph, request: &AcquisitionRequest) -> Result<(), String> {
+    if request.metadata_patch.is_some() {
+        return Err("Metadata patching is not implemented for this slice".into());
+    }
+    if request.duplicate_policy != crate::types::DuplicatePolicy::Rename {
+        return Err("Only Rename duplicate policy is supported".into());
+    }
+    if request.output_profile == OutputProfile::Custom {
+        return Err("Custom output profiles are not implemented".into());
+    }
+    for language in &request.track_selection.subtitle_languages {
+        if !language
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            || !source.subtitle_streams.iter().any(|track| {
+                track.language == *language
+                    && (request.track_selection.include_auto_subtitles
+                        || !track.is_auto.unwrap_or(false))
+            })
+        {
+            return Err(format!(
+                "Selected subtitle language is unavailable: {language}"
+            ));
+        }
+    }
     if let Some(language) = &request.track_selection.audio_language {
         if !source
             .audio_streams
@@ -771,9 +795,9 @@ mod tests {
         assert_eq!(plan.output.container, "mp4");
         assert_eq!(plan.processing.class, ProcessingClass::MergeOnly);
 
-        let compiled = crate::presets::compile_acquisition_args(
+        let compiled = crate::execution::compile_acquisition_args(
             &plan,
-            &crate::presets::ExecutionContext::new(
+            &crate::execution::ExecutionContext::new(
                 &acquisition.output_directory,
                 &crate::types::AppSettings::default(),
             ),
@@ -848,9 +872,9 @@ mod tests {
                 assert_eq!(plan.operation, operation);
                 assert_eq!(plan.output_profile, profile);
 
-                let compiled = crate::presets::compile_acquisition_args(
+                let compiled = crate::execution::compile_acquisition_args(
                     &plan,
-                    &crate::presets::ExecutionContext::new(
+                    &crate::execution::ExecutionContext::new(
                         &acquisition.output_directory,
                         &settings,
                     ),
@@ -874,9 +898,9 @@ mod tests {
         let plan = AcquisitionPlanner::plan(&source, &acquisition).unwrap();
         assert!(plan.processing.requires_ffmpeg);
         assert!(plan.estimated_size.is_none());
-        let compiled = crate::presets::compile_acquisition_args(
+        let compiled = crate::execution::compile_acquisition_args(
             &plan,
-            &crate::presets::ExecutionContext::new(
+            &crate::execution::ExecutionContext::new(
                 &acquisition.output_directory,
                 &crate::types::AppSettings::default(),
             ),
@@ -937,15 +961,15 @@ mod tests {
             AcquisitionOperation::SubtitlesOnly,
         ] {
             let mut acquisition = request(OutputProfile::BestSource, operation);
-            acquisition.track_selection.subtitle_languages = vec!["en".into()];
             if matches!(acquisition.operation, AcquisitionOperation::SubtitlesOnly) {
+                acquisition.track_selection.subtitle_languages = vec!["en".into()];
                 assert!(AcquisitionPlanner::plan(&source, &acquisition).is_err());
                 acquisition.track_selection.include_auto_subtitles = true;
             }
             let plan = AcquisitionPlanner::plan(&source, &acquisition).unwrap();
-            let compiled = crate::presets::compile_acquisition_args(
+            let compiled = crate::execution::compile_acquisition_args(
                 &plan,
-                &crate::presets::ExecutionContext::new(&acquisition.output_directory, &settings),
+                &crate::execution::ExecutionContext::new(&acquisition.output_directory, &settings),
             )
             .unwrap();
             assert!(compiled
@@ -975,9 +999,9 @@ mod tests {
         assert_ne!(first.id, changed.id);
         assert!(changed.warnings.iter().any(|w| w.code == "CONTENT_REMOVAL"));
         assert!(changed.requirements.iter().any(|r| r.code == "FFPROBE"));
-        let args = crate::presets::compile_acquisition_args(
+        let args = crate::execution::compile_acquisition_args(
             &first,
-            &crate::presets::ExecutionContext::new(
+            &crate::execution::ExecutionContext::new(
                 &request.output_directory,
                 &crate::types::AppSettings::default(),
             ),

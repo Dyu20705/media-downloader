@@ -206,8 +206,6 @@ mod tests {
             error_message: None,
             created_at: "now".to_string(),
             completed_at: Some("now".to_string()),
-            subtitle_options: None,
-            sponsor_block_mode: None,
             intent: Some(UserIntent::Balanced),
             recipe: None,
             fingerprint: None,
@@ -221,6 +219,9 @@ mod tests {
         assert!(!recipe.source_url.contains("SECRET_123"));
         assert_eq!(recipe.output_container, "mp4");
         assert_eq!(recipe.strategy, DownloadStrategy::YtDlpDownload);
-        assert_eq!(recipe.transformations, job.acquisition_plan.processing.steps);
+        assert_eq!(
+            recipe.transformations,
+            job.acquisition_plan.processing.steps
+        );
     }
 }

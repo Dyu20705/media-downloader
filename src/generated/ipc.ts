@@ -91,7 +91,7 @@ export type DownloadStatus = "IDLE" | "ANALYZING" | "READY" | "DOWNLOADING" | "P
 
 export type DownloadProgress = { percentage: number, downloadedBytes: number, totalBytes: number, speedBytesPerSec: number, etaSeconds?: number | null, currentSpeed: string, rawStatusLine: string, };
 
-export type MediaInspection = { verificationLevel: VerificationLevel, containerFormat: string, videoCodec?: string | null, videoProfile?: string | null, audioCodec?: string | null, width?: number | null, height?: number | null, fps?: number | null, bitDepth?: number | null, colorSpace?: string | null, isHdr?: boolean | null, bitrateKbps?: number | null, audioChannels?: number | null, audioSampleRateHz?: number | null, audioBitrateKbps?: number | null, audioLanguage?: string | null, fileSizeBytes: number, durationSeconds?: number | null, isLossyTranscodeWarning: boolean, streamCount?: number | null, chaptersCount?: number | null, };
+export type MediaInspection = { subtitleStreamCount: number, verificationLevel: VerificationLevel, containerFormat: string, videoCodec?: string | null, videoProfile?: string | null, audioCodec?: string | null, width?: number | null, height?: number | null, fps?: number | null, bitDepth?: number | null, colorSpace?: string | null, isHdr?: boolean | null, bitrateKbps?: number | null, audioChannels?: number | null, audioSampleRateHz?: number | null, audioBitrateKbps?: number | null, audioLanguage?: string | null, fileSizeBytes: number, durationSeconds?: number | null, isLossyTranscodeWarning: boolean, streamCount?: number | null, chaptersCount?: number | null, };
 
 export type VerificationLevel = "VERIFIED" | "BASIC_INSPECTION" | "UNVERIFIED";
 
@@ -113,9 +113,7 @@ export type DownloadRecipe = { id: string, sourceUrl: string, resolverType: Medi
 
 export type ExplainableResult = { title: string, specsLabel: string, whyReasons: Array<string>, processingSummary: string, transcodingCost: TranscodingCost, verificationChecklist: VerificationChecklist, recipeId?: string | null, };
 
-export type SubtitleOptions = { mode: SubtitleMode, selectedLanguage?: string | null, };
-
-export type DownloadJob = { id: string, url: string, outputDirectory: string, status: DownloadStatus, progress: DownloadProgress, metadata: MediaMetadata, finalFileName?: string | null, finalFilePath?: string | null, inspection?: MediaInspection | null, errorMessage?: string | null, createdAt: string, completedAt?: string | null, subtitleOptions?: SubtitleOptions | null, sponsorBlockMode?: SponsorBlockMode | null, intent?: UserIntent | null, recipe?: DownloadRecipe | null, fingerprint?: MediaFingerprint | null, explainableResult?: ExplainableResult | null, verification?: VerificationResult | null, acquisitionPlan: AcquisitionPlan, };
+export type DownloadJob = { id: string, url: string, outputDirectory: string, status: DownloadStatus, progress: DownloadProgress, metadata: MediaMetadata, finalFileName?: string | null, finalFilePath?: string | null, inspection?: MediaInspection | null, errorMessage?: string | null, createdAt: string, completedAt?: string | null, intent?: UserIntent | null, recipe?: DownloadRecipe | null, fingerprint?: MediaFingerprint | null, explainableResult?: ExplainableResult | null, verification?: VerificationResult | null, acquisitionPlan: AcquisitionPlan, };
 
 export type AppSettings = { downloadDirectory: string, lastPreset: PresetType, defaultQuality: string, openFolderAfterDownload: boolean, autoAnalyzeOnPaste: boolean, embedMetadata: boolean, embedThumbnail: boolean, embedChapters: boolean, concurrentFragments: number, trimFilenames: number, sponsorBlockMode: SponsorBlockMode, subtitleMode: SubtitleMode, preferredSubtitleLanguage: string, customYtdlpPath?: string | null, customFfmpegPath?: string | null, customFfprobePath?: string | null, customMediainfoPath?: string | null, };
 

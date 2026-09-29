@@ -3,9 +3,9 @@ use tauri::State;
 
 use crate::core::diagnostics::DiagnosticsBuffer;
 use crate::core::download_manager::DownloadManager;
+use crate::core::execution::compile_acquisition_args;
 use crate::core::media_graph::MediaGraph;
 use crate::core::planner::AcquisitionPlanner;
-use crate::core::presets::compile_acquisition_args;
 use crate::core::settings::SettingsManager;
 use crate::core::tools::ToolResolver;
 use crate::core::types::{
@@ -77,7 +77,11 @@ pub async fn plan_acquisition(
     state: State<'_, AppState>,
 ) -> Result<AcquisitionPlan, String> {
     let graph = MediaGraph::build_source_graph(&metadata, metadata.source_type.unwrap_or_default());
-    AcquisitionPlanner::plan_with_policy(&graph, &acquisition, (&state.settings.get_settings()).into())
+    AcquisitionPlanner::plan_with_policy(
+        &graph,
+        &acquisition,
+        (&state.settings.get_settings()).into(),
+    )
 }
 
 #[tauri::command]
@@ -93,13 +97,31 @@ pub async fn build_command(
         &request.metadata,
         request.metadata.source_type.unwrap_or_default(),
     );
-    let plan = AcquisitionPlanner::plan_with_policy(&graph, &request.acquisition, (&settings).into())?;
+    let plan =
+        AcquisitionPlanner::plan_with_policy(&graph, &request.acquisition, (&settings).into())?;
     let compiled = compile_acquisition_args(
         &plan,
-        &crate::core::presets::ExecutionContext::new(&request.acquisition.output_directory, &settings),
+        &crate::core::execution::ExecutionContext::new(
+            &request.acquisition.output_directory,
+            &settings,
+        ),
     )?;
 
-    let full_display = format!("yt-dlp {}", compiled.arguments.join(" "));
+    // Argument vectors are displayed as JSON, not as a shell command.
+    let mut full_display = format!(
+        "yt-dlp {}",
+        serde_json::to_string_pretty(&compiled.arguments).map_err(|e| e.to_string())?
+    );
+    if let Some(transform) = &compiled.finalize {
+        let arguments = transform.arguments(
+            std::path::Path::new("<downloaded-file>"),
+            std::path::Path::new(&format!("<verified-output>.{}", transform.container)),
+        );
+        full_display.push_str(&format!(
+            "\n\nffmpeg {}",
+            serde_json::to_string_pretty(&arguments).map_err(|e| e.to_string())?
+        ));
+    }
 
     Ok(BuildCommandResponse {
         command: full_display,

@@ -66,6 +66,18 @@ pub fn verify_against_plan(plan: &AcquisitionPlan, actual: &MediaInspection) -> 
             );
         }
     }
+    if plan.post_process.subtitle_mode == crate::types::SubtitleMode::Embed
+        && !plan.selected_streams.subtitle_languages.is_empty()
+        && !plan.output.audio_only
+    {
+        let expected = plan.selected_streams.subtitle_languages.len() as u32;
+        compare(
+            "Subtitle streams",
+            expected.to_string(),
+            Some(actual.subtitle_stream_count.to_string()),
+            actual.subtitle_stream_count >= expected,
+        );
+    }
     if plan.output.audio_only {
         compare(
             "Video stream",

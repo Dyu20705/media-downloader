@@ -1,8 +1,8 @@
 use ocmd_core::{
     analyzer::parse_ytdlp_json,
+    execution::{compile_acquisition_args, ExecutionContext},
     media_graph::MediaGraph,
     planner::AcquisitionPlanner,
-    presets::{compile_acquisition_args, ExecutionContext},
     types::*,
 };
 
@@ -135,6 +135,92 @@ async fn explicit_transforms_produce_planned_codecs_with_real_ffmpeg() {
         let mut missing = actual.clone();
         missing.audio_codec = None;
         assert!(!ocmd_core::plan_verifier::verify_against_plan(&plan, &missing).conforms);
+        let mut subtitle_plan = plan.clone();
+        subtitle_plan.post_process.subtitle_mode = SubtitleMode::Embed;
+        subtitle_plan.selected_streams.subtitle_languages = vec!["en".into()];
+        let verification = ocmd_core::plan_verifier::verify_against_plan(&subtitle_plan, &actual);
+        assert!(verification
+            .mismatches
+            .iter()
+            .any(|m| m.field == "Subtitle streams"));
+
+        let cover = dir.path().join("cover.jpg");
+        let subtitle = dir.path().join("subtitle.vtt");
+        let decorated = dir.path().join("decorated.mkv");
+        let decorated_output = dir.path().join("decorated.mp4");
+        let run = |args: Vec<String>| {
+            let result = std::process::Command::new("ffmpeg")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        run(vec![
+            "-v".into(),
+            "error".into(),
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "color=c=red:size=32x32".into(),
+            "-frames:v".into(),
+            "1".into(),
+            "-threads".into(),
+            "1".into(),
+            cover.to_string_lossy().into_owned(),
+        ]);
+        std::fs::write(&subtitle, "WEBVTT\n\n00:00.000 --> 00:00.500\nCaption\n").unwrap();
+        run(vec![
+            "-v".into(),
+            "error".into(),
+            "-i".into(),
+            input.to_string_lossy().into_owned(),
+            "-i".into(),
+            subtitle.to_string_lossy().into_owned(),
+            "-map".into(),
+            "0".into(),
+            "-map".into(),
+            "1".into(),
+            "-c".into(),
+            "copy".into(),
+            "-attach".into(),
+            cover.to_string_lossy().into_owned(),
+            "-metadata:s:t:0".into(),
+            "mimetype=image/jpeg".into(),
+            decorated.to_string_lossy().into_owned(),
+        ]);
+        let transform = compile_acquisition_args(
+            &plan,
+            &ExecutionContext::new("/tmp", &AppSettings::default()),
+        )
+        .unwrap()
+        .finalize
+        .unwrap();
+        run(transform.arguments(&decorated, &decorated_output));
+        let with_embeds = ocmd_core::media_verifier::verify_and_inspect_media(
+            &decorated_output,
+            Some(std::path::Path::new("ffprobe")),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(with_embeds.subtitle_stream_count, 1);
+        assert!(
+            ocmd_core::plan_verifier::verify_against_plan(&subtitle_plan, &with_embeds).conforms
+        );
+        let probe = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-show_streams", "-of", "json"])
+            .arg(&decorated_output)
+            .output()
+            .unwrap();
+        let streams: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+        assert!(streams["streams"].as_array().unwrap().iter().any(|s| s
+            .pointer("/disposition/attached_pic")
+            .and_then(|v| v.as_u64())
+            == Some(1)));
     }
 }
 

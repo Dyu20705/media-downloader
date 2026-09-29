@@ -57,6 +57,14 @@ impl FinalTransform {
         if let Some(codec) = &self.audio_encoder {
             args.extend(["-c:a:0".into(), codec.clone()]);
         }
+        if matches!(self.container.as_str(), "mp4" | "mov") {
+            args.extend([
+                "-map".into(),
+                "-0:t?".into(),
+                "-c:s".into(),
+                "mov_text".into(),
+            ]);
+        }
         args.push(output.to_string_lossy().into_owned());
         args
     }

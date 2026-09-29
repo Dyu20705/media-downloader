@@ -162,6 +162,7 @@ mod tests {
             is_lossy_transcode_warning: false,
             stream_count: Some(2),
             chapters_count: Some(0),
+            subtitle_stream_count: 0,
         };
 
         let fp = FingerprintEngine::generate(&meta, Some(&inspection), None);

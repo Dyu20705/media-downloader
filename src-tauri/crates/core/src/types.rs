@@ -725,6 +725,8 @@ pub struct DownloadProgress {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInspection {
+    #[serde(default)]
+    pub subtitle_stream_count: u32,
     pub verification_level: VerificationLevel,
     pub container_format: String,
     #[cfg_attr(test, ts(optional = nullable))]
@@ -906,15 +908,6 @@ pub struct ExplainableResult {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SubtitleOptions {
-    pub mode: SubtitleMode,
-    #[cfg_attr(test, ts(optional = nullable))]
-    pub selected_language: Option<String>,
-}
-
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DownloadJob {
     pub id: String,
     pub url: String,
@@ -933,10 +926,6 @@ pub struct DownloadJob {
     pub created_at: String,
     #[cfg_attr(test, ts(optional = nullable))]
     pub completed_at: Option<String>,
-    #[cfg_attr(test, ts(optional = nullable))]
-    pub subtitle_options: Option<SubtitleOptions>,
-    #[cfg_attr(test, ts(optional = nullable))]
-    pub sponsor_block_mode: Option<SponsorBlockMode>,
     #[cfg_attr(test, ts(optional = nullable))]
     pub intent: Option<UserIntent>,
     #[cfg_attr(test, ts(optional = nullable))]
@@ -1251,7 +1240,6 @@ mod bindings {
             PlanMismatch::decl(),
             DownloadRecipe::decl(),
             ExplainableResult::decl(),
-            SubtitleOptions::decl(),
             DownloadJob::decl(),
             AppSettings::decl(),
             ToolStatus::decl(),

@@ -2,13 +2,15 @@ use one_click_media_downloader_lib::core::analyzer::{analyze_media_metadata, par
 use one_click_media_downloader_lib::core::path_validator::{
     sanitize_file_name, validate_and_ensure_directory,
 };
-use one_click_media_downloader_lib::core::{planner::AcquisitionPlanner, media_graph::MediaGraph, presets::{compile_acquisition_args, ExecutionContext}};
 use one_click_media_downloader_lib::core::state_machine::DownloadStateMachine;
 use one_click_media_downloader_lib::core::tools::ToolResolver;
-use one_click_media_downloader_lib::core::types::{
-    AppSettings, DownloadStatus, MediaKind,
-};
+use one_click_media_downloader_lib::core::types::{DownloadStatus, MediaKind};
 use one_click_media_downloader_lib::core::url_validator::validate_media_url;
+use one_click_media_downloader_lib::core::{
+    execution::{compile_acquisition_args, ExecutionContext},
+    media_graph::MediaGraph,
+    planner::AcquisitionPlanner,
+};
 use std::sync::Arc;
 
 fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
@@ -48,9 +50,22 @@ fn test_acquisition_compilation() {
     use one_click_media_downloader_lib::core::types::*;
     let metadata = parse_ytdlp_json(r#"{"id":"test","title":"Test","formats":[{"format_id":"v","ext":"mp4","width":1280,"height":720,"vcodec":"h264","acodec":"aac"}]}"#, "https://example.com/video").unwrap();
     let graph = MediaGraph::build_source_graph(&metadata, MediaSourceType::YtDlpExtractor);
-    let request = AcquisitionRequest { source_scope: SourceScope::SingleMedia, operation: AcquisitionOperation::EntireMedia, output_profile: OutputProfile::Universal, track_selection: TrackSelection::default(), metadata_patch: None, duplicate_policy: DuplicatePolicy::Rename, output_directory: "/downloads".into(), max_video_height: None };
+    let request = AcquisitionRequest {
+        source_scope: SourceScope::SingleMedia,
+        operation: AcquisitionOperation::EntireMedia,
+        output_profile: OutputProfile::Universal,
+        track_selection: TrackSelection::default(),
+        metadata_patch: None,
+        duplicate_policy: DuplicatePolicy::Rename,
+        output_directory: "/downloads".into(),
+        max_video_height: None,
+    };
     let plan = AcquisitionPlanner::plan(&graph, &request).unwrap();
-    let compiled = compile_acquisition_args(&plan, &ExecutionContext::new("/downloads", &AppSettings::default())).unwrap();
+    let compiled = compile_acquisition_args(
+        &plan,
+        &ExecutionContext::new("/downloads", &AppSettings::default()),
+    )
+    .unwrap();
     assert!(has_arg_pair(&compiled.arguments, "-f", "v"));
     assert!(compiled.finalize.is_none());
 }

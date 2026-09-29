@@ -67,6 +67,7 @@ pub async fn verify_and_inspect_media(
         is_lossy_transcode_warning,
         stream_count: None,
         chapters_count: None,
+        subtitle_stream_count: 0,
     })
 }
 
@@ -396,6 +397,7 @@ async fn inspect_with_ffprobe(
     let mut audio_bitrate_kbps = None;
     let mut audio_language = None;
     let mut stream_count = 0u32;
+    let mut subtitle_stream_count = 0u32;
 
     if let Some(streams) = root.get("streams").and_then(|s| s.as_array()) {
         stream_count = streams.len() as u32;
@@ -404,6 +406,9 @@ async fn inspect_with_ffprobe(
                 .get("codec_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            if codec_type == "subtitle" {
+                subtitle_stream_count += 1;
+            }
             if codec_type == "video"
                 && video_codec.is_none()
                 && stream
@@ -521,6 +526,7 @@ async fn inspect_with_ffprobe(
         is_lossy_transcode_warning,
         stream_count: Some(stream_count),
         chapters_count,
+        subtitle_stream_count,
     })
 }
 
