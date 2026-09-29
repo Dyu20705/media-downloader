@@ -4,7 +4,9 @@ use tempfile::tempdir;
 
 use ocmd_core::diagnostics::DiagnosticsBuffer;
 use ocmd_core::tool_manager::{get_pinned_tool_spec, ToolManager, PINNED_TOOLS};
-use ocmd_core::types::{AppSettings, ToolStatus};
+#[cfg(unix)]
+use ocmd_core::types::AppSettings;
+use ocmd_core::types::ToolStatus;
 
 #[test]
 fn test_pinned_versions_catalog() {
@@ -53,6 +55,7 @@ fn test_checksum_verification_valid_and_tampered() {
     assert!(!ToolManager::verify_sha256(&file_path, tampered_hash).unwrap());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_installation_atomicity_and_staging_cleanup() {
     let tools_dir = tempdir().unwrap();
@@ -154,6 +157,7 @@ async fn test_corrupted_binary_rejection_and_staging_safety() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_resolution_order_priority() {
     let temp_tools = tempdir().unwrap();
@@ -224,6 +228,7 @@ async fn test_resolution_order_priority() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_archive_derived_binary_tampering_is_rejected() {
     let tools_dir = tempdir().unwrap();
@@ -274,6 +279,7 @@ async fn test_archive_derived_binary_tampering_is_rejected() {
     assert!(status.error_message.unwrap().contains("checksum"));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_reinstall_and_repair_flow() {
     let tools_dir = tempdir().unwrap();
@@ -351,7 +357,8 @@ fn test_manifest_can_be_replaced_repeatedly() {
 #[test]
 fn test_all_pinned_checksums_are_sha256_shaped() {
     for spec in PINNED_TOOLS {
-        for checksum in [spec.windows_sha256, spec.linux_sha256, spec.darwin_sha256] {
+        for artifact in spec.artifacts {
+            let checksum = artifact.sha256;
             assert_eq!(
                 checksum.len(),
                 64,

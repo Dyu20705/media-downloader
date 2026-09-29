@@ -5,6 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::diagnostics::DiagnosticsBuffer;
@@ -18,18 +19,46 @@ pub struct PinnedToolSpec {
     pub name: &'static str,
     pub pinned_version: &'static str,
     pub executable_names: &'static [&'static str],
-    pub windows_url: &'static str,
-    pub windows_sha256: &'static str,
-    pub linux_url: &'static str,
-    pub linux_sha256: &'static str,
-    pub darwin_url: &'static str,
-    pub darwin_sha256: &'static str,
+    pub artifacts: &'static [ToolArtifact],
     pub license: &'static str,
     pub license_url: &'static str,
-    pub is_archive: bool,
-    pub archive_bin_path: Option<&'static str>,
     pub is_required: bool,
     pub description: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Packaging {
+    Raw,
+    Zip,
+    TarXz,
+    TarBz2,
+    SevenZip,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolArtifact {
+    pub os: &'static str,
+    pub arch: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub packaging: Packaging,
+    pub executable_path: &'static str,
+}
+
+pub fn artifact_for(
+    spec: &PinnedToolSpec,
+    os: &str,
+    arch: &str,
+) -> Result<&'static ToolArtifact, String> {
+    spec.artifacts
+        .iter()
+        .find(|a| a.os == os && (a.arch == arch || a.arch == "universal"))
+        .ok_or_else(|| {
+            format!(
+                "No managed {} artifact for {os}/{arch}; configure a custom executable",
+                spec.name
+            )
+        })
 }
 
 pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
@@ -37,16 +66,13 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
         name: "yt-dlp",
         pinned_version: "2025.02.19",
         executable_names: if cfg!(windows) { &["yt-dlp.exe", "yt-dlp"] } else { &["yt-dlp"] },
-        windows_url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp.exe",
-        windows_sha256: "785f73d2a71d7992984ea7c3ea4e1837895e7c8ecba0aa2286e1aafe9d424b91",
-        linux_url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp",
-        linux_sha256: "57ca88402db3b72c91838f5fbc7d9f7ad9cbb7a1df58ff7fe2ee398dbd71d3eb",
-        darwin_url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp_macos",
-        darwin_sha256: "d347ffc93839be9b4f2c0df82811a2164746fce529683679c6d39ad85ffccfce",
+        artifacts: &[
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp.exe", sha256: "785f73d2a71d7992984ea7c3ea4e1837895e7c8ecba0aa2286e1aafe9d424b91", packaging: Packaging::Raw, executable_path: "yt-dlp.exe" },
+            ToolArtifact { os: "linux", arch: "universal", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp", sha256: "57ca88402db3b72c91838f5fbc7d9f7ad9cbb7a1df58ff7fe2ee398dbd71d3eb", packaging: Packaging::Raw, executable_path: "yt-dlp" },
+            ToolArtifact { os: "macos", arch: "universal", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp_macos", sha256: "d347ffc93839be9b4f2c0df82811a2164746fce529683679c6d39ad85ffccfce", packaging: Packaging::Raw, executable_path: "yt-dlp" },
+        ],
         license: "Unlicense",
         license_url: "https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE",
-        is_archive: false,
-        archive_bin_path: None,
         is_required: true,
         description: "Primary media extraction engine",
     },
@@ -54,16 +80,13 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
         name: "ffmpeg",
         pinned_version: "7.1",
         executable_names: if cfg!(windows) { &["ffmpeg.exe", "ffmpeg"] } else { &["ffmpeg"] },
-        windows_url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip",
-        windows_sha256: "a937a00f2771d9d150ae1ae6e61f22eec74b41fb386eaebdfd5ffcfcfbc99d99",
-        linux_url: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz",
-        linux_sha256: "e06fa99e2e604f32386e594d80509a25cefcfe02c11eeeb2d9ee18e244b749ad",
-        darwin_url: "https://evermeet.cx/ffmpeg/ffmpeg-7.1.7z",
-        darwin_sha256: "c18a00351283c74ee5d14e1f7a1496a71eec8b74dfa98075fbc074558298711e",
+        artifacts: &[
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip", sha256: "a937a00f2771d9d150ae1ae6e61f22eec74b41fb386eaebdfd5ffcfcfbc99d99", packaging: Packaging::Zip, executable_path: "bin/ffmpeg.exe" },
+            ToolArtifact { os: "linux", arch: "x86_64", url: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", sha256: "e06fa99e2e604f32386e594d80509a25cefcfe02c11eeeb2d9ee18e244b749ad", packaging: Packaging::TarXz, executable_path: "ffmpeg" },
+            ToolArtifact { os: "macos", arch: "x86_64", url: "https://evermeet.cx/ffmpeg/ffmpeg-7.1.7z", sha256: "c18a00351283c74ee5d14e1f7a1496a71eec8b74dfa98075fbc074558298711e", packaging: Packaging::SevenZip, executable_path: "ffmpeg" },
+        ],
         license: "GPL-3.0 / LGPL-2.1+",
         license_url: "https://ffmpeg.org/legal.html",
-        is_archive: true,
-        archive_bin_path: if cfg!(windows) { Some("bin/ffmpeg.exe") } else { Some("ffmpeg") },
         is_required: true,
         description: "Audio/video muxing, encoding, and post-processing engine",
     },
@@ -71,16 +94,13 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
         name: "ffprobe",
         pinned_version: "7.1",
         executable_names: if cfg!(windows) { &["ffprobe.exe", "ffprobe"] } else { &["ffprobe"] },
-        windows_url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip",
-        windows_sha256: "a937a00f2771d9d150ae1ae6e61f22eec74b41fb386eaebdfd5ffcfcfbc99d99",
-        linux_url: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz",
-        linux_sha256: "e06fa99e2e604f32386e594d80509a25cefcfe02c11eeeb2d9ee18e244b749ad",
-        darwin_url: "https://evermeet.cx/ffmpeg/ffprobe-7.1.7z",
-        darwin_sha256: "d19b33a595a882a9341496a7a937a00f2771d9d150ae1ae6e61f22eec74b41fb",
+        artifacts: &[
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip", sha256: "a937a00f2771d9d150ae1ae6e61f22eec74b41fb386eaebdfd5ffcfcfbc99d99", packaging: Packaging::Zip, executable_path: "bin/ffprobe.exe" },
+            ToolArtifact { os: "linux", arch: "x86_64", url: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", sha256: "e06fa99e2e604f32386e594d80509a25cefcfe02c11eeeb2d9ee18e244b749ad", packaging: Packaging::TarXz, executable_path: "ffprobe" },
+            ToolArtifact { os: "macos", arch: "x86_64", url: "https://evermeet.cx/ffmpeg/ffprobe-7.1.7z", sha256: "d19b33a595a882a9341496a7a937a00f2771d9d150ae1ae6e61f22eec74b41fb", packaging: Packaging::SevenZip, executable_path: "ffprobe" },
+        ],
         license: "GPL-3.0 / LGPL-2.1+",
         license_url: "https://ffmpeg.org/legal.html",
-        is_archive: true,
-        archive_bin_path: if cfg!(windows) { Some("bin/ffprobe.exe") } else { Some("ffprobe") },
         is_required: true,
         description: "Media stream analyzer and container inspector",
     },
@@ -88,16 +108,12 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
         name: "mediainfo",
         pinned_version: "24.12",
         executable_names: if cfg!(windows) { &["mediainfo.exe", "MediaInfo.exe", "mediainfo"] } else { &["mediainfo"] },
-        windows_url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Windows_x64.zip",
-        windows_sha256: "f9570aa61fdb930e46124564c7ee23696f4244db919b33a595a882a9341496a7",
-        linux_url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_GNU_FromSource.tar.xz",
-        linux_sha256: "918ef930263f3503f8f117ceecb38b7e4f9b8c08a957b494676579308b47f6d2",
-        darwin_url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Mac.tar.bz2",
-        darwin_sha256: "ea8402db3b72c91838f5fbc7d9f7ad9cbb7a1df58ff7fe2ee398dbd71d3eb847",
+        artifacts: &[
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Windows_x64.zip", sha256: "f9570aa61fdb930e46124564c7ee23696f4244db919b33a595a882a9341496a7", packaging: Packaging::Zip, executable_path: "MediaInfo.exe" },
+            ToolArtifact { os: "macos", arch: "x86_64", url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Mac.tar.bz2", sha256: "ea8402db3b72c91838f5fbc7d9f7ad9cbb7a1df58ff7fe2ee398dbd71d3eb847", packaging: Packaging::TarBz2, executable_path: "mediainfo" },
+        ],
         license: "BSD-2-Clause",
         license_url: "https://mediaarea.net/en/MediaInfo/License",
-        is_archive: true,
-        archive_bin_path: if cfg!(windows) { Some("MediaInfo.exe") } else { Some("mediainfo") },
         is_required: false,
         description: "Deep technical media inspector and verification helper",
     },
@@ -112,14 +128,8 @@ pub fn get_pinned_tool_spec(name: &str) -> Option<&'static PinnedToolSpec> {
 const TOOL_VALIDATION_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_TOOL_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
 
-fn platform_artifact(spec: &PinnedToolSpec) -> (&'static str, &'static str) {
-    if cfg!(windows) {
-        (spec.windows_url, spec.windows_sha256)
-    } else if cfg!(target_os = "macos") {
-        (spec.darwin_url, spec.darwin_sha256)
-    } else {
-        (spec.linux_url, spec.linux_sha256)
-    }
+fn platform_artifact(spec: &PinnedToolSpec) -> Result<&'static ToolArtifact, String> {
+    artifact_for(spec, std::env::consts::OS, std::env::consts::ARCH)
 }
 
 fn parse_date_version(value: &str) -> Option<(u32, u32, u32)> {
@@ -592,7 +602,8 @@ impl ToolManager {
 
         let resolved = self.resolve_tool(tool_name, settings).await;
 
-        let (source_url, expected_sha256) = platform_artifact(spec);
+        let artifact = platform_artifact(spec).ok();
+        let (source_url, expected_sha256) = artifact.map(|a| (a.url, a.sha256)).unwrap_or(("", ""));
 
         match resolved {
             Some(tool) => {
@@ -616,7 +627,7 @@ impl ToolManager {
                             && entry.path == tool.path.to_string_lossy()
                             && entry.sha256.eq_ignore_ascii_case(&actual_sha)
                     });
-                    let is_valid = if spec.is_archive {
+                    let is_valid = if artifact.is_some_and(|a| a.packaging != Packaging::Raw) {
                         is_manifest_match
                     } else {
                         actual_sha.eq_ignore_ascii_case(expected_sha256) || is_manifest_match
@@ -829,7 +840,13 @@ impl ToolManager {
             &format!("Starting atomic installation for {}", tool_name),
         );
 
-        let (source_url, expected_sha256) = platform_artifact(spec);
+        let artifact = platform_artifact(spec)?;
+        if artifact.packaging == Packaging::SevenZip {
+            return Err(
+                "Managed 7z extraction is not supported; configure a custom executable".into(),
+            );
+        }
+        let (source_url, expected_sha256) = (artifact.url, artifact.sha256);
 
         let staging_dir = self.get_staging_dir();
         fs::create_dir_all(&staging_dir)
@@ -851,7 +868,7 @@ impl ToolManager {
         // Perform download
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
-            .user_agent("OneClickMediaDownloader/1.0 (Linux; x86_64)")
+            .user_agent("OneClickMediaDownloader/1.0")
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
@@ -879,44 +896,48 @@ impl ToolManager {
             ));
         }
 
-        let capacity = response
-            .content_length()
-            .unwrap_or(0)
-            .min(MAX_TOOL_DOWNLOAD_BYTES) as usize;
-        let mut bytes = Vec::with_capacity(capacity);
-
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|e| format!("Failed to read response stream: {}", e))?
-        {
-            let next_len = bytes
-                .len()
-                .checked_add(chunk.len())
-                .ok_or_else(|| "Tool download size overflow".to_string())?;
-            if next_len > MAX_TOOL_DOWNLOAD_BYTES as usize {
-                return Err(format!(
-                    "Tool archive exceeds the {} MiB download limit",
-                    MAX_TOOL_DOWNLOAD_BYTES / (1024 * 1024)
-                ));
+        let install_res = async {
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp_file_path)
+                .await
+                .map_err(|e| format!("Failed to create staging file: {e}"))?;
+            let mut downloaded = 0u64;
+            let mut hasher = Sha256::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|e| format!("Failed to read response stream: {e}"))?
+            {
+                downloaded = downloaded
+                    .checked_add(chunk.len() as u64)
+                    .ok_or("Tool download size overflow")?;
+                if downloaded > MAX_TOOL_DOWNLOAD_BYTES {
+                    return Err("Tool archive exceeds the 256 MiB download limit".into());
+                }
+                hasher.update(&chunk);
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|e| format!("Failed to write staging file: {e}"))?;
             }
-            bytes.extend_from_slice(&chunk);
-        }
-
-        fs::write(&tmp_file_path, &bytes)
-            .map_err(|e| format!("Failed to write staging file: {}", e))?;
-
-        // Atomic Installation from verified file
-        let install_res = self
-            .atomic_install_from_staging(
+            file.sync_all()
+                .await
+                .map_err(|e| format!("Failed to flush staging file: {e}"))?;
+            drop(file);
+            if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(expected_sha256) {
+                return Err("Security checksum validation failed for downloaded tool".into());
+            }
+            self.atomic_install_from_staging(
                 tool_name,
                 &tmp_file_path,
                 expected_sha256,
-                spec.is_archive,
+                artifact.packaging,
+                artifact.executable_path,
             )
-            .await;
-
-        // Cleanup staging file regardless of outcome
+            .await
+        }
+        .await;
         let _ = fs::remove_file(&tmp_file_path);
 
         match install_res {
@@ -966,7 +987,21 @@ impl ToolManager {
             .map_err(|e| format!("Failed to write staging file: {}", e))?;
 
         let res = self
-            .atomic_install_from_staging(tool_name, &tmp_file_path, expected_sha256, is_archive)
+            .atomic_install_from_staging(
+                tool_name,
+                &tmp_file_path,
+                expected_sha256,
+                if is_archive {
+                    Packaging::Zip
+                } else {
+                    Packaging::Raw
+                },
+                if cfg!(windows) {
+                    spec_binary_name(tool_name)
+                } else {
+                    tool_name
+                },
+            )
             .await;
         let _ = fs::remove_file(&tmp_file_path);
         if res.is_ok() {
@@ -981,7 +1016,8 @@ impl ToolManager {
         tool_name: &str,
         staged_file: &Path,
         expected_sha256: &str,
-        is_archive: bool,
+        packaging: Packaging,
+        executable_path: &str,
     ) -> Result<ToolStatusInfo, String> {
         let spec = get_pinned_tool_spec(tool_name)
             .ok_or_else(|| format!("Unknown tool specification: {}", tool_name))?;
@@ -1020,73 +1056,11 @@ impl ToolManager {
 
         let staged_bin_path = staging_extract_dir.join(&final_bin_name);
 
-        if is_archive {
-            let mut extracted = false;
-
-            // Try Zip extraction first
-            if let Ok(file) = File::open(staged_file) {
-                if let Ok(mut archive) = zip::ZipArchive::new(file) {
-                    for i in 0..archive.len() {
-                        if let Ok(mut zip_file) = archive.by_index(i) {
-                            let enclosed = zip_file.enclosed_name().map(|p| p.to_owned());
-                            if let Some(rel_path) = enclosed {
-                                let file_name =
-                                    rel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                                if file_name.eq_ignore_ascii_case(&final_bin_name) {
-                                    if let Ok(mut out_file) = File::create(&staged_bin_path) {
-                                        if std::io::copy(&mut zip_file, &mut out_file).is_ok() {
-                                            extracted = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // If not extracted via zip, try system tar on Unix for tar.xz / tar.gz / tar.bz2
-            #[cfg(unix)]
-            if !extracted {
-                let tar_output = Command::new("tar")
-                    .arg("-xf")
-                    .arg(staged_file)
-                    .arg("-C")
-                    .arg(&staging_extract_dir)
-                    .output()
-                    .await;
-
-                if let Ok(out) = tar_output {
-                    if out.status.success() {
-                        let mut found_paths = Vec::new();
-                        Self::find_files_bounded(
-                            &staging_extract_dir,
-                            std::slice::from_ref(&final_bin_name),
-                            5,
-                            &mut found_paths,
-                        );
-                        if let Some(first_path) = found_paths.into_iter().next() {
-                            if first_path != staged_bin_path {
-                                let _ = fs::copy(&first_path, &staged_bin_path);
-                            }
-                            extracted = staged_bin_path.exists();
-                        }
-                    }
-                }
-            }
-
-            if !extracted || !staged_bin_path.exists() {
-                let _ = fs::remove_dir_all(&staging_extract_dir);
-                return Err(format!(
-                    "Binary '{}' could not be extracted from archive",
-                    final_bin_name
-                ));
-            }
-        } else {
-            // Direct binary
-            fs::copy(staged_file, &staged_bin_path)
-                .map_err(|e| format!("Failed to copy binary to staging: {}", e))?;
+        if let Err(error) =
+            extract_binary(staged_file, &staged_bin_path, packaging, executable_path).await
+        {
+            let _ = fs::remove_dir_all(&staging_extract_dir);
+            return Err(error);
         }
 
         // Ensure executable permissions on Unix
@@ -1122,21 +1096,22 @@ impl ToolManager {
             .map_err(|e| format!("Failed to create target version dir: {}", e))?;
 
         let final_destination = target_version_dir.join(&final_bin_name);
-        if final_destination.exists() {
-            let _ = fs::remove_file(&final_destination);
+        let backup = target_version_dir.join(format!(
+            ".{final_bin_name}.{}.bak",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let had_previous = final_destination.exists();
+        if had_previous {
+            fs::rename(&final_destination, &backup)
+                .map_err(|e| format!("Could not preserve previous executable: {e}"))?;
         }
-
-        fs::rename(&staged_bin_path, &final_destination)
-            .or_else(|_| {
-                fs::copy(&staged_bin_path, &final_destination)
-                    .and_then(|_| fs::remove_file(&staged_bin_path))
-            })
-            .map_err(|e| {
-                format!(
-                    "Failed to activate binary into {:?}: {}",
-                    final_destination, e
-                )
-            })?;
+        if let Err(error) = fs::rename(&staged_bin_path, &final_destination) {
+            if had_previous {
+                let _ = fs::rename(&backup, &final_destination);
+            }
+            let _ = fs::remove_dir_all(&staging_extract_dir);
+            return Err(format!("Failed to activate verified executable: {error}"));
+        }
 
         // Ensure final destination has executable permissions on Unix
         #[cfg(unix)]
@@ -1153,8 +1128,7 @@ impl ToolManager {
 
         // 5. Atomically update manifest.json
         let mut manifest = self.load_manifest();
-        let bin_sha = Self::compute_sha256(&final_destination)
-            .unwrap_or_else(|_| expected_sha256.to_string());
+        let bin_sha = Self::compute_sha256(&final_destination)?;
 
         manifest.tools.insert(
             tool_name.to_string(),
@@ -1168,7 +1142,16 @@ impl ToolManager {
             },
         );
         manifest.last_updated = chrono::Utc::now().to_rfc3339();
-        self.save_manifest_atomic(&manifest)?;
+        if let Err(error) = self.save_manifest_atomic(&manifest) {
+            let _ = fs::remove_file(&final_destination);
+            if had_previous {
+                let _ = fs::rename(&backup, &final_destination);
+            }
+            return Err(error);
+        }
+        if had_previous {
+            let _ = fs::remove_file(&backup);
+        }
 
         Ok(ToolStatusInfo {
             name: tool_name.to_string(),
@@ -1177,7 +1160,7 @@ impl ToolManager {
             pinned_version: spec.pinned_version.to_string(),
             path: Some(final_destination.to_string_lossy().to_string()),
             managed: true,
-            source_url: Some(platform_artifact(spec).0.to_string()),
+            source_url: platform_artifact(spec).ok().map(|a| a.url.to_string()),
             sha256: Some(bin_sha),
             error_message: None,
             license: spec.license.to_string(),
@@ -1188,8 +1171,7 @@ impl ToolManager {
 
     /// Repair or reinstall a tool
     pub async fn repair_tool(&self, tool_name: &str) -> Result<ToolStatusInfo, String> {
-        let spec = get_pinned_tool_spec(tool_name)
-            .ok_or_else(|| format!("Unknown tool: {}", tool_name))?;
+        get_pinned_tool_spec(tool_name).ok_or_else(|| format!("Unknown tool: {}", tool_name))?;
 
         self.diagnostics.log(
             "warn",
@@ -1197,16 +1179,7 @@ impl ToolManager {
             &format!("Initiating repair/reinstall for {}", tool_name),
         );
 
-        // Remove active managed files if corrupted
-        let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
-        if version_dir.exists() {
-            let _ = fs::remove_dir_all(&version_dir);
-        }
-
-        let mut manifest = self.load_manifest();
-        manifest.tools.remove(tool_name);
-        let _ = self.save_manifest_atomic(&manifest);
-
+        // Keep the existing installation until its replacement has passed validation.
         self.clear_cache();
         self.install_tool(tool_name).await
     }
@@ -1269,5 +1242,223 @@ mod version_tests {
         assert!(!is_date_version_older("2025.02.19", "2025.02.19"));
         assert!(!is_date_version_older("stable 2026.01.02", "2025.02.19"));
         assert!(!is_date_version_older("unknown", "2025.02.19"));
+    }
+}
+
+fn spec_binary_name(name: &str) -> &str {
+    match name {
+        "yt-dlp" => "yt-dlp.exe",
+        "ffmpeg" => "ffmpeg.exe",
+        "ffprobe" => "ffprobe.exe",
+        "mediainfo" => "mediainfo.exe",
+        other => other,
+    }
+}
+
+fn matching_member(name: &str, expected: &str) -> bool {
+    let path = Path::new(name);
+    !path.is_absolute()
+        && !name.contains('\\')
+        && !name.contains(':')
+        && path.components().all(|p| {
+            matches!(
+                p,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+        && (name.eq_ignore_ascii_case(expected)
+            || name
+                .to_lowercase()
+                .ends_with(&format!("/{}", expected.to_lowercase())))
+}
+
+async fn extract_binary(
+    archive: &Path,
+    output: &Path,
+    packaging: Packaging,
+    expected: &str,
+) -> Result<(), String> {
+    match packaging {
+        Packaging::Raw => {
+            fs::copy(archive, output).map_err(|e| e.to_string())?;
+        }
+        Packaging::SevenZip => {
+            return Err(
+                "Managed 7z extraction is not supported; configure a custom executable".into(),
+            )
+        }
+        Packaging::Zip => {
+            let file = File::open(archive).map_err(|e| e.to_string())?;
+            let mut zip =
+                zip::ZipArchive::new(file).map_err(|e| format!("Invalid ZIP archive: {e}"))?;
+            let mut matches = Vec::new();
+            for i in 0..zip.len() {
+                let entry = zip.by_index(i).map_err(|e| e.to_string())?;
+                if entry.is_file() && matching_member(entry.name(), expected) {
+                    matches.push(i);
+                }
+            }
+            if matches.len() != 1 {
+                return Err(format!(
+                    "Expected one '{expected}' executable in ZIP, found {}",
+                    matches.len()
+                ));
+            }
+            let mut entry = zip.by_index(matches[0]).map_err(|e| e.to_string())?;
+            if entry.size() > MAX_TOOL_DOWNLOAD_BYTES {
+                return Err("Extracted executable exceeds size limit".into());
+            }
+            let mut target = File::create(output).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut target).map_err(|e| e.to_string())?;
+        }
+        Packaging::TarXz | Packaging::TarBz2 => {
+            let listing = tokio::time::timeout(
+                TOOL_VALIDATION_TIMEOUT,
+                Command::new("tar")
+                    .kill_on_drop(true)
+                    .arg("-tf")
+                    .arg(archive)
+                    .output(),
+            )
+            .await
+            .map_err(|_| "Archive listing timed out")?
+            .map_err(|e| e.to_string())?;
+            if !listing.status.success() {
+                return Err("Unable to list tar archive".into());
+            }
+            let names = String::from_utf8(listing.stdout).map_err(|e| e.to_string())?;
+            let matches: Vec<_> = names
+                .lines()
+                .filter(|name| matching_member(name, expected))
+                .collect();
+            if matches.len() != 1 {
+                return Err(format!(
+                    "Expected one '{expected}' executable in tar, found {}",
+                    matches.len()
+                ));
+            }
+            let mut child = Command::new("tar")
+                .kill_on_drop(true)
+                .arg("-xOf")
+                .arg(archive)
+                .arg("--")
+                .arg(matches[0])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            let mut stdout = child.stdout.take().ok_or("Missing tar stdout")?;
+            let mut target = tokio::fs::File::create(output)
+                .await
+                .map_err(|e| e.to_string())?;
+            let copy = async {
+                use tokio::io::AsyncReadExt;
+                let count = tokio::io::copy(
+                    &mut (&mut stdout).take(MAX_TOOL_DOWNLOAD_BYTES + 1),
+                    &mut target,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                if count > MAX_TOOL_DOWNLOAD_BYTES {
+                    return Err("Extracted executable exceeds size limit".to_string());
+                }
+                if !child.wait().await.map_err(|e| e.to_string())?.success() {
+                    return Err("Tar extraction failed".into());
+                }
+                Ok(())
+            };
+            tokio::time::timeout(Duration::from_secs(60), copy)
+                .await
+                .map_err(|_| "Archive extraction timed out")??;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn artifact_matrix_rejects_wrong_arch_and_source_packages() {
+        let ffmpeg = get_pinned_tool_spec("ffmpeg").unwrap();
+        assert_eq!(
+            artifact_for(ffmpeg, "windows", "x86_64").unwrap().packaging,
+            Packaging::Zip
+        );
+        assert_eq!(
+            artifact_for(ffmpeg, "linux", "x86_64").unwrap().packaging,
+            Packaging::TarXz
+        );
+        assert_eq!(
+            artifact_for(ffmpeg, "macos", "x86_64").unwrap().packaging,
+            Packaging::SevenZip
+        );
+        assert!(artifact_for(ffmpeg, "linux", "aarch64").is_err());
+        assert!(artifact_for(ffmpeg, "macos", "aarch64").is_err());
+        assert!(artifact_for(ffmpeg, "freebsd", "x86_64").is_err());
+        assert!(artifact_for(
+            get_pinned_tool_spec("mediainfo").unwrap(),
+            "linux",
+            "x86_64"
+        )
+        .is_err());
+        assert!(artifact_for(get_pinned_tool_spec("yt-dlp").unwrap(), "macos", "aarch64").is_ok());
+    }
+
+    #[tokio::test]
+    async fn zip_extracts_only_unique_declared_executable() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("fixture.zip");
+        let output = temp.path().join("binary");
+        let create_zip = |names: &[&str]| {
+            let mut zip = zip::ZipWriter::new(File::create(&archive).unwrap());
+            for name in names {
+                zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(b"fixture").unwrap();
+            }
+            zip.finish().unwrap();
+        };
+        create_zip(&["release/bin/ffmpeg.exe", "release/readme.txt"]);
+        extract_binary(&archive, &output, Packaging::Zip, "bin/ffmpeg.exe")
+            .await
+            .unwrap();
+        assert_eq!(fs::read(&output).unwrap(), b"fixture");
+        assert!(!temp.path().join("release").exists());
+        create_zip(&["a/bin/ffmpeg.exe", "b/bin/ffmpeg.exe"]);
+        assert!(
+            extract_binary(&archive, &output, Packaging::Zip, "bin/ffmpeg.exe")
+                .await
+                .unwrap_err()
+                .contains("found 2")
+        );
+        create_zip(&["../bin/ffmpeg.exe"]);
+        assert!(
+            extract_binary(&archive, &output, Packaging::Zip, "bin/ffmpeg.exe")
+                .await
+                .is_err()
+        );
+        assert!(
+            extract_binary(&archive, &output, Packaging::SevenZip, "ffmpeg")
+                .await
+                .unwrap_err()
+                .contains("7z")
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_member_names() {
+        for name in [
+            "/bin/ffmpeg",
+            "../ffmpeg",
+            "a/../../ffmpeg",
+            "C:/bin/ffmpeg",
+            "a\\..\\ffmpeg",
+        ] {
+            assert!(!matching_member(name, "ffmpeg"), "{name}");
+        }
+        assert!(matching_member("release/ffmpeg", "ffmpeg"));
     }
 }
