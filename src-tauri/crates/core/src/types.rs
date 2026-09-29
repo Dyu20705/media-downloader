@@ -155,6 +155,8 @@ pub struct PlanRequirement {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcquisitionPlan {
+    pub transforms: Vec<PlannedTransform>,
+    pub include_auto_subtitles: bool,
     pub post_process: PostProcessPolicy,
     pub time_range_ms: Option<[u64; 2]>,
     pub id: String,
@@ -169,6 +171,21 @@ pub struct AcquisitionPlan {
     pub estimated_size: Option<SizeEstimate>,
     pub warnings: Vec<PlanWarning>,
     pub requirements: Vec<PlanRequirement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "SCREAMING_SNAKE_CASE",
+    rename_all_fields = "camelCase"
+)]
+pub enum PlannedTransform {
+    Merge,
+    Remux { container: String },
+    ExtractAudio { format: String },
+    TranscodeVideo { codec: String },
+    TranscodeAudio { codec: String },
+    Trim { start_ms: u64, end_ms: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -324,6 +341,7 @@ pub struct MediaChapter {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaFormatSpec {
+    pub language: Option<String>,
     pub format_id: String,
     pub ext: String,
     pub resolution: Option<String>,
@@ -371,7 +389,7 @@ pub struct VideoStreamSpec {
     pub profile: Option<String>,
     pub width: u32,
     pub height: u32,
-    pub fps: f64,
+    pub fps: Option<f64>,
     pub bitrate_kbps: Option<u64>,
     pub is_hdr: bool,
     pub dynamic_range: Option<String>,
@@ -626,11 +644,28 @@ pub struct VerificationChecklist {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResult {
+    pub plan_verification: PlanVerification,
     pub is_valid: bool,
     pub verification_level: VerificationLevel,
     pub checklist: VerificationChecklist,
     pub output_artifact: Option<OutputMediaArtifact>,
     pub fingerprint: Option<MediaFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanVerification {
+    pub conforms: bool,
+    pub mismatches: Vec<PlanMismatch>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanMismatch {
+    pub field: String,
+    pub planned: String,
+    pub actual: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -674,8 +709,6 @@ pub struct SubtitleOptions {
 pub struct DownloadJob {
     pub id: String,
     pub url: String,
-    pub preset: PresetType,
-    pub quality: String,
     pub output_directory: String,
     pub status: DownloadStatus,
     pub progress: DownloadProgress,

@@ -96,9 +96,7 @@ pub async fn build_command(
     let plan = AcquisitionPlanner::plan_with_policy(&graph, &request.acquisition, (&settings).into())?;
     let compiled = compile_acquisition_args(
         &plan,
-        &request.acquisition,
-        &request.metadata.webpage_url,
-        &settings,
+        &crate::core::presets::ExecutionContext::new(&request.acquisition.output_directory, &settings),
     )?;
 
     let full_display = format!("yt-dlp {}", compiled.arguments.join(" "));

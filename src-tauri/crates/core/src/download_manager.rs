@@ -15,8 +15,7 @@ use crate::settings::SettingsManager;
 use crate::state_machine::DownloadStateMachine;
 use crate::tools::ToolResolver;
 use crate::types::{
-    AcquisitionOperation, DownloadJob, DownloadProgress, DownloadStatus, OutputProfile, PresetType,
-    StartDownloadRequest,
+    AcquisitionOperation, DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest,
 };
 use crate::url_validator::validate_media_url_network;
 
@@ -118,7 +117,7 @@ impl DownloadManager {
             plan.operation,
             AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
         );
-        if sidecar {
+        {
             let unique = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| e.to_string())?
@@ -127,9 +126,13 @@ impl DownloadManager {
             std::fs::create_dir(&output_dir_path).map_err(|e| e.to_string())?;
             acquisition.output_directory = output_dir_path.to_string_lossy().into_owned();
         }
-        let compiled =
-            compile_acquisition_args(&plan, &acquisition, &valid_url, &current_settings)?;
-        let (legacy_preset, legacy_quality) = legacy_job_labels(&acquisition);
+        let compiled = compile_acquisition_args(
+            &plan,
+            &crate::presets::ExecutionContext::new(
+                &acquisition.output_directory,
+                &current_settings,
+            ),
+        )?;
 
         let job_id = format!("job-{}", Local::now().timestamp_millis());
         let now_str = Local::now().to_rfc3339();
@@ -137,8 +140,6 @@ impl DownloadManager {
         let initial_job = DownloadJob {
             id: job_id.clone(),
             url: valid_url.clone(),
-            preset: legacy_preset,
-            quality: legacy_quality,
             output_directory: output_dir_path.to_string_lossy().to_string(),
             status: DownloadStatus::Downloading,
             progress: DownloadProgress::default(),
@@ -307,7 +308,55 @@ impl DownloadManager {
                     };
 
                     match final_path {
-                        Some(resolved_file) => {
+                        Some(mut resolved_file) => {
+                            if let Some(transform) = &compiled.finalize {
+                                if let Some(job) = active_job_clone.write().await.as_mut() {
+                                    job.status = DownloadStatus::PostProcessing;
+                                }
+                                let output = resolved_file.with_file_name(format!(
+                                    "{}.converted.{}",
+                                    resolved_file
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("media"),
+                                    transform.container
+                                ));
+                                let result = match tool_resolver_clone
+                                    .resolve_tool_with_settings(
+                                        "ffmpeg",
+                                        Some(&verification_settings),
+                                    )
+                                    .await
+                                {
+                                    Some(tool) => {
+                                        run_final_transform(
+                                            &tool.path,
+                                            &transform.arguments(&resolved_file, &output),
+                                            &mut cancel_rx,
+                                            &diagnostics_clone,
+                                        )
+                                        .await
+                                    }
+                                    None => Err("Required FFmpeg became unavailable".into()),
+                                };
+                                if let Err(error) = result {
+                                    if let Some(job) = active_job_clone.write().await.as_mut() {
+                                        job.status = if error == "Cancelled" {
+                                            DownloadStatus::Cancelled
+                                        } else {
+                                            DownloadStatus::Failed
+                                        };
+                                        job.error_message = Some(error);
+                                        job.completed_at = Some(Local::now().to_rfc3339());
+                                    }
+                                    *active_handle_clone.lock().await = None;
+                                    return;
+                                }
+                                resolved_file = output;
+                                if let Some(job) = active_job_clone.write().await.as_mut() {
+                                    job.status = DownloadStatus::Verifying;
+                                }
+                            }
                             diagnostics_clone.log(
                                 "INFO",
                                 "VERIFY",
@@ -368,6 +417,9 @@ impl DownloadManager {
                                             job,
                                             job.verification.as_ref().map(|v| v.checklist.clone()),
                                         );
+                                        if let Some(explanation) = job.explainable_result.as_mut() {
+                                            explanation.recipe_id = Some(recipe.id.clone());
+                                        }
                                         job.recipe = Some(recipe);
 
                                         if job.verification.as_ref().is_some_and(|v| v.is_valid) {
@@ -469,6 +521,33 @@ impl DownloadManager {
     }
 }
 
+async fn run_final_transform(
+    ffmpeg: &std::path::Path,
+    args: &[String],
+    cancel_rx: &mut mpsc::Receiver<()>,
+    diagnostics: &DiagnosticsBuffer,
+) -> Result<(), String> {
+    if cancel_rx.try_recv().is_ok() {
+        return Err("Cancelled".into());
+    }
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut process = ProcessHandle::spawn_with_streaming(ffmpeg, args, tx).await?;
+    loop {
+        tokio::select! {
+            _ = cancel_rx.recv() => { process.kill_tree().await; return Err("Cancelled".into()); }
+            line = rx.recv() => match line {
+                Some(line) => diagnostics.log("DEBUG", "FFMPEG", &line),
+                None => break,
+            }
+        }
+    }
+    if process.wait_for_exit().await? {
+        Ok(())
+    } else {
+        Err("Planned FFmpeg transformation failed; source retained.".into())
+    }
+}
+
 fn required_tools(plan: &crate::types::AcquisitionPlan) -> Vec<&'static str> {
     let mut tools = vec!["yt-dlp"];
     if plan.processing.requires_ffmpeg {
@@ -480,28 +559,13 @@ fn required_tools(plan: &crate::types::AcquisitionPlan) -> Vec<&'static str> {
     tools
 }
 
-fn legacy_job_labels(request: &crate::types::AcquisitionRequest) -> (PresetType, String) {
-    let preset = match (&request.operation, request.output_profile) {
-        (AcquisitionOperation::AudioOnly, OutputProfile::Universal) => PresetType::Mp3,
-        (AcquisitionOperation::AudioOnly, OutputProfile::Editing) => PresetType::Flac,
-        (AcquisitionOperation::AudioOnly, _) => PresetType::BestAudio,
-        (_, OutputProfile::BestSource) => PresetType::BestVideo,
-        _ => PresetType::Mp4Compatible,
-    };
-    let quality = request
-        .max_video_height
-        .map(|height| height.to_string())
-        .unwrap_or_else(|| "auto".to_string());
-    (preset, quality)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tool_manager::ToolManager;
     use crate::types::{
         AcquisitionRequest, DuplicatePolicy, MediaFormatSpec, MediaKind, MediaMetadata,
-        OutputProfile, PresetType, SourceScope, TrackSelection,
+        OutputProfile, SourceScope, TrackSelection,
     };
 
     fn test_job() -> DownloadJob {
@@ -540,6 +604,7 @@ mod tests {
             automatic_captions: None,
             chapters: None,
             formats: Some(vec![MediaFormatSpec {
+                language: None,
                 format_id: "combined".to_string(),
                 ext: "mp4".to_string(),
                 resolution: Some("1280x720".to_string()),
@@ -584,8 +649,6 @@ mod tests {
         DownloadJob {
             id: "job-cancel-test".to_string(),
             url: "https://example.com/media".to_string(),
-            preset: PresetType::Mp4Compatible,
-            quality: "auto".to_string(),
             output_directory: "/tmp".to_string(),
             status: DownloadStatus::Downloading,
             progress: DownloadProgress::default(),

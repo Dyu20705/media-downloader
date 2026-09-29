@@ -208,7 +208,10 @@ pub fn generate_verification_and_explanation(
         notes,
     };
 
-    let is_valid = inspection.verification_level == VerificationLevel::Verified
+    let plan_verification =
+        crate::plan_verifier::verify_against_plan(&job.acquisition_plan, inspection);
+    let is_valid = plan_verification.conforms
+        && inspection.verification_level == VerificationLevel::Verified
         && file_exists
         && file_size_valid
         && duration_valid
@@ -272,39 +275,25 @@ pub fn generate_verification_and_explanation(
         )
     };
 
-    let why_reasons = if sidecar {
-        vec!["Artifact-specific inspection; media duration is not applicable.".into()]
-    } else if let Some(rec) = &job.metadata.smart_recommendation {
-        rec.why_reasons.clone()
-    } else {
-        let mut reasons = vec![
-            "✓ matched requested quality target".to_string(),
-            "✓ native stream container encapsulation".to_string(),
-            "✓ no unnecessary generational transcoding".to_string(),
-        ];
-        reasons.push(if is_valid {
-            "✓ media streams verified with ffprobe".to_string()
+    let why_reasons = vec![
+        format!("Executed acquisition plan {}", job.acquisition_plan.id),
+        if plan_verification.conforms {
+            "Output conforms to the inspected plan properties.".into()
         } else {
-            "⚠ deep stream verification unavailable or failed".to_string()
-        });
-        reasons
+            "Output does not conform to the reviewed plan.".into()
+        },
+    ];
+    use crate::types::ProcessingClass;
+    let transcoding_cost = match job.acquisition_plan.processing.class {
+        ProcessingClass::SourcePreserved => TranscodingCost::StreamCopy,
+        ProcessingClass::MergeOnly => TranscodingCost::Merge,
+        ProcessingClass::RemuxOnly => TranscodingCost::Remux,
+        ProcessingClass::AudioTranscode
+        | ProcessingClass::VideoTranscode
+        | ProcessingClass::FullTranscode => TranscodingCost::Transcode,
+        ProcessingClass::Unknown => TranscodingCost::NoProcessing,
     };
-
-    let transcoding_cost = job
-        .metadata
-        .transcoding_cost
-        .unwrap_or(TranscodingCost::Merge);
-    let processing_summary = match transcoding_cost {
-        TranscodingCost::StreamCopy => {
-            "Direct stream copy (zero bitstream modification)".to_string()
-        }
-        TranscodingCost::Merge => {
-            "Merged video and audio bitstreams without video re-encode".to_string()
-        }
-        TranscodingCost::Remux => "Remuxed container packaging (zero re-encoding)".to_string(),
-        TranscodingCost::Transcode => "Transcoded audio to requested target codec".to_string(),
-        TranscodingCost::NoProcessing => "Media acquired".to_string(),
-    };
+    let processing_summary = job.acquisition_plan.processing.steps.join("; ");
 
     let explainable_result = ExplainableResult {
         title: job.metadata.title.clone(),
@@ -321,6 +310,7 @@ pub fn generate_verification_and_explanation(
     };
 
     let verification_result = VerificationResult {
+        plan_verification,
         is_valid,
         verification_level: inspection.verification_level,
         checklist,
@@ -414,7 +404,13 @@ async fn inspect_with_ffprobe(
                 .get("codec_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            if codec_type == "video" && video_codec.is_none() {
+            if codec_type == "video"
+                && video_codec.is_none()
+                && stream
+                    .pointer("/disposition/attached_pic")
+                    .and_then(|v| v.as_u64())
+                    != Some(1)
+            {
                 video_codec = stream
                     .get("codec_name")
                     .and_then(|v| v.as_str())

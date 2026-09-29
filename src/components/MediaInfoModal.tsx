@@ -615,7 +615,7 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   <div>
                     <span className="text-zinc-500 block">Container:</span>
                     <span className="font-bold text-zinc-100">
-                      {inspection?.containerFormat || job?.acquisitionPlan.output.container.toUpperCase() || 'Unknown'}
+                      {inspection?.containerFormat || 'Unknown'}
                     </span>
                   </div>
                   <div>
@@ -626,7 +626,7 @@ export const MediaInfoModal: React.FC<MediaInfoModalProps> = ({ metadata: rawMet
                   </div>
                   <div>
                     <span className="text-zinc-500 block">Stream Count:</span>
-                    <span className="font-medium text-zinc-200">{inspection?.streamCount || '2 (Video + Audio)'}</span>
+                    <span className="font-medium text-zinc-200">{inspection?.streamCount ?? 'Unknown'}</span>
                   </div>
                 </div>
 

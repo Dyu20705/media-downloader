@@ -134,7 +134,7 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
       </div>
 
       {job.inspection && (
-        <PlanActualComparison plan={job.acquisitionPlan} inspection={job.inspection} />
+        <PlanActualComparison plan={job.acquisitionPlan} inspection={job.inspection} verification={job.verification} />
       )}
 
       {/* Processing Explanation */}

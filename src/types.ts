@@ -65,6 +65,8 @@ export interface AcquisitionRequest {
 }
 
 export interface AcquisitionPlan {
+  transforms: Array<{ type: string; codec?: string; container?: string; format?: string; startMs?: number; endMs?: number }>;
+  includeAutoSubtitles: boolean;
   postProcess: {
     embedMetadata: boolean;
     embedThumbnail: boolean;
@@ -128,6 +130,7 @@ export interface MediaChapter {
 }
 
 export interface MediaFormatSpec {
+  language?: string | null;
   formatId: string;
   ext: string;
   resolution?: string | null;
@@ -316,6 +319,11 @@ export interface OutputMediaArtifact {
 }
 
 export interface VerificationResult {
+  planVerification: {
+    conforms: boolean;
+    mismatches: Array<{ field: string; planned: string; actual: string | null }>;
+    warnings: string[];
+  };
   isValid: boolean;
   verificationLevel: VerificationLevel;
   checklist: VerificationChecklist;
@@ -351,8 +359,6 @@ export interface ExplainableResult {
 export interface DownloadJob {
   id: string;
   url: string;
-  preset: PresetType;
-  quality: string;
   outputDirectory: string;
   status: DownloadStatus;
   progress: DownloadProgress;

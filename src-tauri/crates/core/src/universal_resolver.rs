@@ -583,6 +583,7 @@ impl UniversalResolver {
 
         let format_spec = if !play_addr.is_empty() {
             Some(vec![crate::types::MediaFormatSpec {
+                language: None,
                 format_id: "direct_mp4".to_string(),
                 ext: "mp4".to_string(),
                 resolution: Some("1080p".to_string()),

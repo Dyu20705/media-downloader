@@ -24,7 +24,11 @@ impl RecipeEngine {
             .clone()
             .unwrap_or_else(|| "generic".to_string());
 
-        let output_container = job.acquisition_plan.output.container.clone();
+        let output_container = job
+            .inspection
+            .as_ref()
+            .map(|i| i.container_format.clone())
+            .unwrap_or_else(|| job.acquisition_plan.output.container.clone());
 
         let strategy = match job.acquisition_plan.processing.class {
             ProcessingClass::SourcePreserved => DownloadStrategy::YtDlpDownload,
@@ -33,49 +37,10 @@ impl RecipeEngine {
             ProcessingClass::AudioTranscode
             | ProcessingClass::VideoTranscode
             | ProcessingClass::FullTranscode => DownloadStrategy::FfmpegTranscode,
-            ProcessingClass::Unknown => job
-                .metadata
-                .strategy
-                .unwrap_or(DownloadStrategy::YtDlpMerge),
+            ProcessingClass::Unknown => DownloadStrategy::YtDlpDownload,
         };
 
-        let mut transformations = job.acquisition_plan.processing.steps.clone();
-        match strategy {
-            DownloadStrategy::DirectCopy => {
-                transformations.push("Direct stream copy (zero re-encoding)".to_string());
-            }
-            DownloadStrategy::YtDlpMerge => {
-                transformations.push("Multiplex video and audio bitstreams".to_string());
-                transformations.push(format!(
-                    "Target container encapsulation: {}",
-                    output_container
-                ));
-            }
-            DownloadStrategy::FfmpegRemux => {
-                transformations.push("Container remuxing without bitstream alteration".to_string());
-            }
-            DownloadStrategy::FfmpegTranscode => {
-                transformations.push("Transcode to target audio codec".to_string());
-            }
-            DownloadStrategy::HlsDownload => {
-                transformations.push("HLS segment fetching and unified concatenation".to_string());
-            }
-            DownloadStrategy::DashDownload => {
-                transformations.push("DASH adaptation set fetching and multiplexing".to_string());
-            }
-            DownloadStrategy::YtDlpDownload => {
-                transformations.push("Progressive stream acquisition".to_string());
-            }
-        }
-
-        if let Some(opts) = &job.subtitle_options {
-            if opts.mode == crate::types::SubtitleMode::Embed {
-                transformations.push(format!(
-                    "Embed subtitle stream ({})",
-                    opts.selected_language.as_deref().unwrap_or("auto")
-                ));
-            }
-        }
+        let transformations = job.acquisition_plan.processing.steps.clone();
 
         let mut hasher = DefaultHasher::new();
         job.id.hash(&mut hasher);
@@ -184,6 +149,7 @@ mod tests {
             automatic_captions: None,
             chapters: None,
             formats: Some(vec![MediaFormatSpec {
+                language: None,
                 format_id: "combined".to_string(),
                 ext: "mp4".to_string(),
                 resolution: Some("1920x1080".to_string()),
@@ -230,8 +196,6 @@ mod tests {
         let job = DownloadJob {
             id: "job_01".to_string(),
             url: "https://example.com/watch?v=1&token=SECRET_123".to_string(),
-            preset: PresetType::Mp4Compatible,
-            quality: "1080".to_string(),
             output_directory: "/tmp".to_string(),
             status: DownloadStatus::Completed,
             progress: DownloadProgress::default(),
@@ -257,6 +221,6 @@ mod tests {
         assert!(!recipe.source_url.contains("SECRET_123"));
         assert_eq!(recipe.output_container, "mp4");
         assert_eq!(recipe.strategy, DownloadStrategy::YtDlpDownload);
-        assert!(recipe.transformations.len() >= 2);
+        assert_eq!(recipe.transformations, job.acquisition_plan.processing.steps);
     }
 }

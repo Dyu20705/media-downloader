@@ -1,40 +1,90 @@
 use crate::progress_parser::FINAL_PATH_PREFIX;
 use crate::types::{
-    AcquisitionOperation, AcquisitionPlan, AcquisitionRequest, AppSettings, OutputProfile,
-    PresetType, ProcessingClass,
+    AcquisitionOperation, AcquisitionPlan, AppSettings, PlannedTransform, SponsorBlockMode,
+    SubtitleMode,
 };
+use std::path::Path;
 
-#[derive(Debug, Clone)]
-pub struct CompiledPreset {
-    pub arguments: Vec<String>,
-    pub is_audio_only: bool,
-    pub is_lossy_conversion: bool,
+pub struct ExecutionContext {
+    pub output_directory: String,
+    pub concurrent_fragments: u32,
+    pub trim_filenames: u32,
 }
 
-/// Compiles only the execution details already decided by the canonical planner.
-/// Stream choice, output shape, and processing policy must not be inferred here.
+impl ExecutionContext {
+    pub fn new(output_directory: &str, settings: &AppSettings) -> Self {
+        Self {
+            output_directory: output_directory.into(),
+            concurrent_fragments: settings.concurrent_fragments.max(1),
+            trim_filenames: settings.trim_filenames.max(1),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledAcquisition {
+    pub arguments: Vec<String>,
+    pub is_lossy_conversion: bool,
+    pub finalize: Option<FinalTransform>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinalTransform {
+    pub container: String,
+    pub video_encoder: Option<String>,
+    pub audio_encoder: Option<String>,
+}
+
+impl FinalTransform {
+    pub fn arguments(&self, input: &Path, output: &Path) -> Vec<String> {
+        let mut args = vec![
+            "-nostdin".into(),
+            "-n".into(),
+            "-i".into(),
+            input.to_string_lossy().into_owned(),
+            "-map".into(),
+            "0".into(),
+            "-map_metadata".into(),
+            "0".into(),
+            "-map_chapters".into(),
+            "0".into(),
+            "-c".into(),
+            "copy".into(),
+        ];
+        if let Some(codec) = &self.video_encoder {
+            args.extend(["-c:v:0".into(), codec.clone()]);
+        }
+        if let Some(codec) = &self.audio_encoder {
+            args.extend(["-c:a:0".into(), codec.clone()]);
+        }
+        args.push(output.to_string_lossy().into_owned());
+        args
+    }
+}
+
+/// Only operational parameters are supplied outside the reviewed plan.
 pub fn compile_acquisition_args(
     plan: &AcquisitionPlan,
-    request: &AcquisitionRequest,
-    url: &str,
-    settings: &AppSettings,
-) -> Result<CompiledPreset, String> {
-    if matches!(
-        plan.operation,
-        AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
-    ) {
-        let mut args = vec![
-            "--ignore-config".into(),
-            "--no-playlist".into(),
+    context: &ExecutionContext,
+) -> Result<CompiledAcquisition, String> {
+    let mut args = vec![
+        "--ignore-config".into(),
+        "--no-playlist".into(),
+        "--no-simulate".into(),
+        "--newline".into(),
+    ];
+    let thumbnail = matches!(plan.operation, AcquisitionOperation::ThumbnailOnly);
+    let subtitle = matches!(plan.operation, AcquisitionOperation::SubtitlesOnly);
+    if thumbnail || subtitle {
+        args.extend([
             "--skip-download".into(),
-            "--no-simulate".into(),
             "-o".into(),
-            std::path::Path::new(&request.output_directory)
+            Path::new(&context.output_directory)
                 .join("artifact.%(ext)s")
                 .to_string_lossy()
                 .into_owned(),
-        ];
-        if matches!(plan.operation, AcquisitionOperation::ThumbnailOnly) {
+        ]);
+        if thumbnail {
             args.extend([
                 "--write-thumbnail".into(),
                 "--convert-thumbnails".into(),
@@ -48,450 +98,171 @@ pub fn compile_acquisition_args(
                 "--sub-langs".into(),
                 plan.selected_streams.subtitle_languages.join(","),
             ]);
-            if request.track_selection.include_auto_subtitles {
+            if plan.include_auto_subtitles {
                 args.push("--write-auto-subs".into());
             }
         }
-        args.push(url.into());
-        return Ok(CompiledPreset {
+        args.push(plan.source.url.clone());
+        return Ok(CompiledAcquisition {
             arguments: args,
-            is_audio_only: false,
             is_lossy_conversion: false,
+            finalize: None,
         });
     }
-    let mut args = vec![
-        "--ignore-config".to_string(),
-        "--no-simulate".to_string(),
-        "--newline".to_string(),
-        "--progress".to_string(),
-        "--no-warnings".to_string(),
-        "--print".to_string(),
-        format!("after_move:{}%(filepath)s", FINAL_PATH_PREFIX),
-        "--concurrent-fragments".to_string(),
-        settings.concurrent_fragments.max(1).to_string(),
-    ];
-
-    let video_id = plan.selected_streams.video_stream_id.as_deref();
-    let audio_id = plan.selected_streams.audio_stream_id.as_deref();
-    let format_selector = match (video_id, audio_id) {
-        (Some(video), Some(audio)) if video == audio => video.to_string(),
-        (Some(video), Some(audio)) => format!("{video}+{audio}"),
-        (Some(video), None) => video.to_string(),
-        (None, Some(audio)) => audio.to_string(),
-        (None, None) => {
-            return Err("The acquisition plan selected no executable stream".to_string())
-        }
+    let selector = match (
+        plan.selected_streams.video_stream_id.as_deref(),
+        plan.selected_streams.audio_stream_id.as_deref(),
+    ) {
+        (Some(v), Some(a)) if v != a => format!("{v}+{a}"),
+        (Some(v), _) => v.into(),
+        (_, Some(a)) => a.into(),
+        _ => return Err("Plan has no executable streams".into()),
     };
-    args.push("-f".to_string());
-    args.push(format_selector);
-    args.push("--no-playlist".to_string());
-    if let Some([start_ms, end_ms]) = plan.time_range_ms {
-        args.extend([
-            "--download-sections".to_string(),
-            format!(
-                "*{}.{:03}-{}.{:03}",
-                start_ms / 1000,
-                start_ms % 1000,
-                end_ms / 1000,
-                end_ms % 1000
-            ),
-        ]);
-    }
-
-    let is_audio_only = matches!(request.operation, AcquisitionOperation::AudioOnly);
-    if is_audio_only {
-        args.push("-x".to_string());
-        if matches!(
-            request.output_profile,
-            OutputProfile::Universal | OutputProfile::Editing
-        ) {
-            args.push("--audio-format".to_string());
-            args.push(plan.output.container.clone());
-            if request.output_profile == OutputProfile::Universal {
-                args.push("--audio-quality".to_string());
-                args.push("0".to_string());
+    args.extend([
+        "--progress".into(),
+        "--print".into(),
+        format!("after_move:{}%(filepath)s", FINAL_PATH_PREFIX),
+        "--concurrent-fragments".into(),
+        context.concurrent_fragments.to_string(),
+        "-f".into(),
+        selector,
+    ]);
+    let mut finalize = FinalTransform {
+        container: plan.output.container.clone(),
+        video_encoder: None,
+        audio_encoder: None,
+    };
+    let mut lossy = false;
+    for transform in &plan.transforms {
+        match transform {
+            PlannedTransform::Merge => {
+                args.extend([
+                    "--merge-output-format".into(),
+                    if plan.output.audio_only {
+                        plan.output.container.clone()
+                    } else {
+                        "mkv".into()
+                    },
+                ]);
             }
+            PlannedTransform::Remux { container } => {
+                args.extend(["--remux-video".into(), container.clone()])
+            }
+            PlannedTransform::ExtractAudio { format } => {
+                let encoder = match format.as_str() {
+                    "ogg" => "vorbis",
+                    "mka" => {
+                        return Err("Source audio codec has no supported extraction format".into())
+                    }
+                    other => other,
+                };
+                args.extend(["-x".into(), "--audio-format".into(), encoder.into()]);
+                if format == "mp3" {
+                    args.extend(["--audio-quality".into(), "0".into()]);
+                }
+            }
+            PlannedTransform::TranscodeVideo { codec } => {
+                finalize.video_encoder = Some(match codec.as_str() {
+                    "h264" => "libx264".into(),
+                    _ => return Err(format!("Unsupported planned video codec: {codec}")),
+                });
+                lossy = true;
+            }
+            PlannedTransform::TranscodeAudio { codec } => {
+                lossy |= codec != "flac";
+                if !plan.output.audio_only {
+                    finalize.audio_encoder = Some(match codec.as_str() {
+                        "aac" => "aac".into(),
+                        _ => return Err(format!("Unsupported planned audio codec: {codec}")),
+                    });
+                }
+            }
+            PlannedTransform::Trim { start_ms, end_ms } => args.extend([
+                "--download-sections".into(),
+                format!(
+                    "*{}.{:03}-{}.{:03}",
+                    start_ms / 1000,
+                    start_ms % 1000,
+                    end_ms / 1000,
+                    end_ms % 1000
+                ),
+            ]),
         }
+    }
+    let finalize = if finalize.video_encoder.is_some() || finalize.audio_encoder.is_some() {
+        Some(finalize)
     } else {
-        args.push("--merge-output-format".to_string());
-        args.push(plan.output.container.clone());
-        if matches!(
-            plan.processing.class,
-            ProcessingClass::AudioTranscode
-                | ProcessingClass::VideoTranscode
-                | ProcessingClass::FullTranscode
-        ) {
-            args.push("--recode-video".to_string());
-            args.push(plan.output.container.clone());
+        None
+    };
+    if finalize.is_none()
+        && plan
+            .transforms
+            .iter()
+            .any(|t| matches!(t, PlannedTransform::Merge))
+    {
+        // This is the planned mux target; no codec choices are made here.
+        if let Some(index) = args.iter().position(|a| a == "--merge-output-format") {
+            args[index + 1] = plan.output.container.clone();
         }
     }
-
-    if plan.post_process.embed_metadata {
-        args.push("--embed-metadata".to_string());
+    let policy = &plan.post_process;
+    if policy.embed_metadata {
+        args.push("--embed-metadata".into());
     }
-    if plan.post_process.embed_thumbnail {
-        args.push("--embed-thumbnail".to_string());
+    if policy.embed_thumbnail {
+        args.push("--embed-thumbnail".into());
     }
-    if plan.post_process.embed_chapters && !is_audio_only {
-        args.push("--embed-chapters".to_string());
+    if policy.embed_chapters && !plan.output.audio_only {
+        args.push("--embed-chapters".into());
     }
-    match plan.post_process.sponsor_block_mode {
-        crate::types::SponsorBlockMode::MarkChapters => {
-            args.extend(["--sponsorblock-mark".to_string(), "all".to_string()]);
+    match policy.sponsor_block_mode {
+        SponsorBlockMode::MarkChapters => args.extend(["--sponsorblock-mark".into(), "all".into()]),
+        SponsorBlockMode::RemoveSegments => {
+            args.extend(["--sponsorblock-remove".into(), "all".into()])
         }
-        crate::types::SponsorBlockMode::RemoveSegments => {
-            args.extend(["--sponsorblock-remove".to_string(), "all".to_string()]);
-        }
-        crate::types::SponsorBlockMode::Off => {}
+        SponsorBlockMode::Off => {}
     }
-
-    if !plan.selected_streams.subtitle_languages.is_empty() && !is_audio_only {
-        args.push("--sub-langs".to_string());
-        args.push(plan.selected_streams.subtitle_languages.join(","));
-        if matches!(
-            plan.post_process.subtitle_mode,
-            crate::types::SubtitleMode::Embed
-        ) {
-            args.push("--embed-subs".to_string());
-        } else {
-            args.push("--write-subs".to_string());
+    if !plan.selected_streams.subtitle_languages.is_empty()
+        && !plan.output.audio_only
+        && policy.subtitle_mode != SubtitleMode::None
+    {
+        args.extend([
+            "--sub-langs".into(),
+            plan.selected_streams.subtitle_languages.join(","),
+        ]);
+        args.push(
+            if policy.subtitle_mode == SubtitleMode::Embed {
+                "--embed-subs"
+            } else {
+                "--write-subs"
+            }
+            .into(),
+        );
+        if plan.include_auto_subtitles {
+            args.push("--write-auto-subs".into());
         }
     }
-
-    let separator =
-        if request.output_directory.ends_with('/') || request.output_directory.ends_with('\\') {
-            ""
-        } else if cfg!(windows) || request.output_directory.contains('\\') {
-            "\\"
-        } else {
-            "/"
-        };
-    args.push("-o".to_string());
-    let range_suffix = match plan.operation {
+    let suffix = match plan.operation {
+        AcquisitionOperation::Clip { start_ms, end_ms } => format!(" [clip-{start_ms}-{end_ms}]"),
         AcquisitionOperation::Chapter { chapter_index } => {
             format!(" [chapter-{}]", chapter_index + 1)
         }
-        AcquisitionOperation::Clip { start_ms, end_ms } => format!(" [clip-{start_ms}-{end_ms}]"),
         _ => String::new(),
     };
-    args.push(format!(
-        "{}{}%(title).{}B [%(id)s]{}.%(ext)s",
-        request.output_directory,
-        separator,
-        settings.trim_filenames.max(1),
-        range_suffix
-    ));
-    args.push(url.to_string());
-
-    Ok(CompiledPreset {
+    args.extend([
+        "-o".into(),
+        Path::new(&context.output_directory)
+            .join(format!(
+                "%(title).{}B [%(id)s]{suffix}.%(ext)s",
+                context.trim_filenames
+            ))
+            .to_string_lossy()
+            .into_owned(),
+        plan.source.url.clone(),
+    ]);
+    Ok(CompiledAcquisition {
         arguments: args,
-        is_audio_only,
-        is_lossy_conversion: matches!(
-            plan.processing.class,
-            ProcessingClass::AudioTranscode
-                | ProcessingClass::VideoTranscode
-                | ProcessingClass::FullTranscode
-        ),
+        is_lossy_conversion: lossy,
+        finalize,
     })
-}
-
-pub fn compile_download_args(
-    preset: PresetType,
-    quality: &str,
-    output_dir: &str,
-    url: &str,
-    settings: &AppSettings,
-) -> CompiledPreset {
-    let mut args: Vec<String> = Vec::new();
-
-    let is_audio = matches!(
-        preset,
-        PresetType::BestAudio | PresetType::Mp3 | PresetType::Flac
-    );
-    let is_lossy_conversion = preset == PresetType::Mp3;
-
-    // Progress & stdout stream configuration
-    args.push("--newline".to_string());
-    args.push("--progress".to_string());
-    args.push("--no-warnings".to_string());
-    args.push("--print".to_string());
-    args.push(format!("after_move:{}%(filepath)s", FINAL_PATH_PREFIX));
-
-    // Performance contract: 1 concurrent fragment to prevent stalls
-    let fragments = if settings.concurrent_fragments > 0 {
-        settings.concurrent_fragments.to_string()
-    } else {
-        "1".to_string()
-    };
-    args.push("--concurrent-fragments".to_string());
-    args.push(fragments);
-
-    let max_title_bytes = if settings.trim_filenames > 0 {
-        settings.trim_filenames
-    } else {
-        180
-    };
-
-    // Format selection & Preset specific flags
-    match preset {
-        PresetType::Mp4Compatible => {
-            let f = if quality != "auto" && !quality.is_empty() {
-                format!(
-                    "bv*[ext=mp4][height<={q}]+ba[ext=m4a]/b[ext=mp4][height<={q}]/bv*[height<={q}]+ba/b[height<={q}]",
-                    q = quality
-                )
-            } else {
-                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv+ba/b".to_string()
-            };
-            args.push("-f".to_string());
-            args.push(f.clone());
-            args.push("--merge-output-format".to_string());
-            args.push("mp4".to_string());
-        }
-        PresetType::BestVideo => {
-            let f = if quality != "auto" && !quality.is_empty() {
-                format!("bv*[height<={q}]+ba/b[height<={q}]/bv+ba/b", q = quality)
-            } else {
-                "bv+ba/b".to_string()
-            };
-            args.push("-f".to_string());
-            args.push(f.clone());
-            args.push("--merge-output-format".to_string());
-            args.push("mkv".to_string());
-        }
-        PresetType::BestAudio => {
-            args.push("-f".to_string());
-            args.push("bestaudio/b".to_string());
-            args.push("-x".to_string());
-        }
-        PresetType::Mp3 => {
-            args.push("-f".to_string());
-            args.push("bestaudio/b".to_string());
-            args.push("-x".to_string());
-            args.push("--audio-format".to_string());
-            args.push("mp3".to_string());
-            args.push("--audio-quality".to_string());
-            args.push("0".to_string());
-        }
-        PresetType::Flac => {
-            args.push("-f".to_string());
-            args.push("bestaudio/b".to_string());
-            args.push("-x".to_string());
-            args.push("--audio-format".to_string());
-            args.push("flac".to_string());
-        }
-    }
-
-    // Metadata & Chapter flags
-    if settings.embed_metadata {
-        args.push("--embed-metadata".to_string());
-    }
-    if settings.embed_thumbnail {
-        args.push("--embed-thumbnail".to_string());
-    }
-    if settings.embed_chapters && !is_audio {
-        args.push("--embed-chapters".to_string());
-    }
-
-    // SponsorBlock support
-    match settings.sponsor_block_mode {
-        crate::types::SponsorBlockMode::MarkChapters => {
-            args.push("--sponsorblock-mark".to_string());
-            args.push("all".to_string());
-        }
-        crate::types::SponsorBlockMode::RemoveSegments => {
-            args.push("--sponsorblock-remove".to_string());
-            args.push("all".to_string());
-        }
-        crate::types::SponsorBlockMode::Off => {}
-    }
-
-    // Subtitle support
-    match settings.subtitle_mode {
-        crate::types::SubtitleMode::Embed if !is_audio => {
-            args.push("--embed-subs".to_string());
-            args.push("--sub-langs".to_string());
-            let lang = if settings.preferred_subtitle_language.is_empty() {
-                "en.*,en".to_string()
-            } else {
-                settings.preferred_subtitle_language.clone()
-            };
-            args.push(lang);
-        }
-        crate::types::SubtitleMode::DownloadSeparate => {
-            args.push("--write-subs".to_string());
-            args.push("--sub-langs".to_string());
-            let lang = if settings.preferred_subtitle_language.is_empty() {
-                "en.*,en".to_string()
-            } else {
-                settings.preferred_subtitle_language.clone()
-            };
-            args.push(lang);
-        }
-        _ => {}
-    }
-
-    // Output template
-    let sep = if output_dir.ends_with('/') || output_dir.ends_with('\\') {
-        ""
-    } else if cfg!(windows) || output_dir.contains('\\') {
-        "\\"
-    } else {
-        "/"
-    };
-
-    let template = format!(
-        "{}{}%(title).{}B [%(id)s].%(ext)s",
-        output_dir, sep, max_title_bytes
-    );
-    args.push("-o".to_string());
-    args.push(template);
-
-    // Target URL
-    args.push(url.to_string());
-
-    CompiledPreset {
-        arguments: args,
-        is_audio_only: is_audio,
-        is_lossy_conversion,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
-        arguments
-            .windows(2)
-            .any(|pair| pair[0] == flag && pair[1] == value)
-    }
-
-    #[test]
-    fn test_mp4_compatible_preset() {
-        let settings = AppSettings::default();
-        let compiled = compile_download_args(
-            PresetType::Mp4Compatible,
-            "1080",
-            "/tmp/downloads",
-            "https://example.com/video",
-            &settings,
-        );
-
-        assert!(compiled.arguments.contains(&"-f".to_string()));
-        assert!(compiled
-            .arguments
-            .iter()
-            .any(|a| a.contains("height<=1080")));
-        assert!(compiled
-            .arguments
-            .contains(&"--merge-output-format".to_string()));
-        assert!(has_arg_pair(
-            &compiled.arguments,
-            "--merge-output-format",
-            "mp4"
-        ));
-        assert!(!compiled.is_audio_only);
-        assert!(has_arg_pair(
-            &compiled.arguments,
-            "--print",
-            "after_move:__OCMD_FINAL_PATH__%(filepath)s"
-        ));
-    }
-
-    #[test]
-    fn test_best_video_preset() {
-        let settings = AppSettings::default();
-        let compiled = compile_download_args(
-            PresetType::BestVideo,
-            "auto",
-            "/tmp/downloads",
-            "https://example.com/video",
-            &settings,
-        );
-
-        assert!(has_arg_pair(&compiled.arguments, "-f", "bv+ba/b"));
-        assert!(has_arg_pair(
-            &compiled.arguments,
-            "--merge-output-format",
-            "mkv"
-        ));
-        assert!(!compiled.is_audio_only);
-    }
-
-    #[test]
-    fn test_best_audio_preserves_source_format() {
-        let settings = AppSettings::default();
-        let compiled = compile_download_args(
-            PresetType::BestAudio,
-            "auto",
-            "/tmp/downloads",
-            "https://example.com/audio",
-            &settings,
-        );
-
-        assert!(compiled.arguments.contains(&"-x".to_string()));
-        assert!(has_arg_pair(&compiled.arguments, "-f", "bestaudio/b"));
-        assert!(!compiled.arguments.contains(&"--audio-format".to_string()));
-        assert!(compiled.is_audio_only);
-        assert!(!compiled.is_lossy_conversion);
-    }
-
-    #[test]
-    fn test_mp3_preset() {
-        let settings = AppSettings::default();
-        let compiled = compile_download_args(
-            PresetType::Mp3,
-            "auto",
-            "/tmp/downloads",
-            "https://example.com/audio",
-            &settings,
-        );
-
-        assert!(compiled.arguments.contains(&"-x".to_string()));
-        assert!(has_arg_pair(&compiled.arguments, "--audio-format", "mp3"));
-        assert!(has_arg_pair(&compiled.arguments, "--audio-quality", "0"));
-        assert!(compiled.is_audio_only);
-        assert!(compiled.is_lossy_conversion);
-    }
-
-    #[test]
-    fn test_flac_is_not_marked_as_lossy_conversion() {
-        let settings = AppSettings::default();
-        let compiled = compile_download_args(
-            PresetType::Flac,
-            "auto",
-            "/tmp/downloads",
-            "https://example.com/audio",
-            &settings,
-        );
-
-        assert!(!compiled.is_lossy_conversion);
-        assert!(has_arg_pair(&compiled.arguments, "--audio-format", "flac"));
-    }
-
-    #[test]
-    fn test_sponsorblock_and_subtitles() {
-        let settings = AppSettings {
-            sponsor_block_mode: crate::types::SponsorBlockMode::MarkChapters,
-            subtitle_mode: crate::types::SubtitleMode::Embed,
-            preferred_subtitle_language: "en,es".to_string(),
-            ..AppSettings::default()
-        };
-
-        let compiled = compile_download_args(
-            PresetType::Mp4Compatible,
-            "1080",
-            "/tmp/downloads",
-            "https://example.com/video",
-            &settings,
-        );
-
-        assert!(compiled
-            .arguments
-            .contains(&"--sponsorblock-mark".to_string()));
-        assert!(compiled.arguments.contains(&"--embed-subs".to_string()));
-        assert!(compiled.arguments.contains(&"en,es".to_string()));
-        assert!(compiled.arguments.contains(&"--embed-chapters".to_string()));
-    }
 }

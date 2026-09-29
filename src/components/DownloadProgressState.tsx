@@ -123,6 +123,9 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
               {activeJob.errorMessage}
             </p>
           )}
+          {activeJob.inspection && activeJob.verification && (
+            <AcquisitionReceipt job={activeJob} onOpenFile={handleOpenFile} onOpenDirectory={handleOpenFolder} />
+          )}
 
           <div className="flex items-center gap-2 pt-1">
             <button

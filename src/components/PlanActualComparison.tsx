@@ -1,16 +1,11 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, FileCheck2 } from 'lucide-react';
-import type { AcquisitionPlan, MediaInspection } from '../types';
+import type { AcquisitionPlan, MediaInspection, VerificationResult } from '../types';
 
 interface PlanActualComparisonProps {
   plan: AcquisitionPlan;
   inspection: MediaInspection;
-}
-
-interface Difference {
-  field: string;
-  planned: string;
-  actual: string;
+  verification: VerificationResult | null | undefined;
 }
 
 function formatBytes(bytes: number): string {
@@ -40,67 +35,13 @@ function codecFamily(value?: string | null): string | null {
   return value.toUpperCase();
 }
 
-function containerMatches(planned: string, actual: string): boolean {
-  const wanted = planned.toLowerCase();
-  const found = actual.toLowerCase();
-  if (wanted === 'jpg') return found === 'image2' || found === 'jpeg_pipe' || found === 'mjpeg';
-  if (wanted === 'mp4') return found.includes('mp4') || found.includes('mov');
-  if (wanted === 'mkv') return found.includes('matroska');
-  if (wanted === 'webm') return found.includes('webm');
-  return found.split(',').some((part) => part.trim() === wanted) || found.includes(wanted);
-}
-
-function collectDifferences(plan: AcquisitionPlan, actual: MediaInspection): Difference[] {
-  const differences: Difference[] = [];
-  if (plan.timeRangeMs && actual.durationSeconds != null) {
-    const requested = (plan.timeRangeMs[1] - plan.timeRangeMs[0]) / 1000;
-    if (Math.abs(requested - actual.durationSeconds) > 0.1) {
-      differences.push({ field: 'Clip duration', planned: `${requested.toFixed(3)} s`, actual: `${actual.durationSeconds.toFixed(3)} s` });
-    }
-  }
-  const plannedVideo = codecFamily(plan.output.videoCodec);
-  const actualVideo = codecFamily(actual.videoCodec);
-  const plannedAudio = codecFamily(plan.output.audioCodec);
-  const actualAudio = codecFamily(actual.audioCodec);
-
-  if (actual.containerFormat && !containerMatches(plan.output.container, actual.containerFormat)) {
-    differences.push({ field: 'Container', planned: plan.output.container.toUpperCase(), actual: actual.containerFormat.toUpperCase() });
-  }
-  if (plannedVideo && actualVideo && plannedVideo !== actualVideo) {
-    differences.push({ field: 'Video codec', planned: plannedVideo, actual: actualVideo });
-  }
-  if (plan.output.audioOnly && actualVideo) {
-    differences.push({ field: 'Video stream', planned: 'None', actual: actualVideo });
-  }
-  if (plannedAudio && actualAudio && plannedAudio !== actualAudio) {
-    differences.push({ field: 'Audio codec', planned: plannedAudio, actual: actualAudio });
-  }
-  if (plan.output.width && plan.output.height && actual.width && actual.height
-      && (plan.output.width !== actual.width || plan.output.height !== actual.height)) {
-    differences.push({
-      field: 'Resolution',
-      planned: `${plan.output.width}×${plan.output.height}`,
-      actual: `${actual.width}×${actual.height}`,
-    });
-  }
-  if (plan.output.fps && actual.fps && Math.abs(plan.output.fps - actual.fps) > 0.1) {
-    differences.push({
-      field: 'Frame rate',
-      planned: `${plan.output.fps.toFixed(2)} fps`,
-      actual: `${actual.fps.toFixed(2)} fps`,
-    });
-  }
-
-  return differences;
-}
-
 function known(values: Array<string | null | undefined>): string {
   const present = values.filter((value): value is string => Boolean(value));
   return present.length > 0 ? present.join(' · ') : 'Unknown';
 }
 
-export const PlanActualComparison: React.FC<PlanActualComparisonProps> = ({ plan, inspection }) => {
-  const differences = collectDifferences(plan, inspection);
+export const PlanActualComparison: React.FC<PlanActualComparisonProps> = ({ plan, inspection, verification }) => {
+  const differences = verification?.planVerification.mismatches ?? [];
   const sidecar = ['THUMBNAIL_ONLY', 'SUBTITLES_ONLY'].includes(plan.operation.type);
   const resolution = inspection.width && inspection.height ? `${inspection.width}×${inspection.height}` : null;
   const fps = inspection.fps ? `${inspection.fps.toFixed(Number.isInteger(inspection.fps) ? 0 : 2)} fps` : null;
@@ -127,10 +68,11 @@ export const PlanActualComparison: React.FC<PlanActualComparisonProps> = ({ plan
       </div>
 
       <div className="mt-3 border-t border-slate-800/80 pt-3">
+        {verification?.planVerification.warnings.map(warning => <p key={warning} className="mb-2 text-xs text-amber-300">{warning}</p>)}
         {differences.length === 0 ? (
           <div className="flex items-center gap-2 text-xs text-emerald-300">
             <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>Verified properties match the download plan.</span>
+            <span>{verification?.planVerification.conforms ? 'Inspected properties conform to the download plan.' : 'Plan conformance has not been verified.'}</span>
           </div>
         ) : (
           <div>
@@ -144,7 +86,7 @@ export const PlanActualComparison: React.FC<PlanActualComparisonProps> = ({ plan
                   <span className="font-medium text-slate-300">{difference.field}</span>
                   <span className="truncate font-mono text-slate-400" title={difference.planned}>{difference.planned}</span>
                   <span className="text-amber-500" aria-hidden="true">→</span>
-                  <span className="truncate font-mono text-amber-200" title={difference.actual}>{difference.actual}</span>
+                  <span className="truncate font-mono text-amber-200" title={difference.actual ?? 'Missing'}>{difference.actual ?? 'Missing'}</span>
                 </div>
               ))}
             </div>

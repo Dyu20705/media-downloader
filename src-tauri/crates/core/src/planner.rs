@@ -12,6 +12,60 @@ pub const PLAN_VERSION: u32 = 2;
 pub struct AcquisitionPlanner;
 
 impl AcquisitionPlanner {
+    pub fn plan(
+        source: &SourceMediaGraph,
+        request: &AcquisitionRequest,
+    ) -> Result<AcquisitionPlan, String> {
+        let mut plan = Self::plan_base(source, request)?;
+        use crate::types::PlannedTransform as T;
+        let class = plan.processing.class;
+        plan.transforms.clear();
+        if plan.selected_streams.video_stream_id.is_some()
+            && plan.selected_streams.audio_stream_id.is_some()
+            && plan.selected_streams.video_stream_id != plan.selected_streams.audio_stream_id
+        {
+            plan.transforms.push(T::Merge);
+        }
+        if plan.output.audio_only {
+            plan.transforms.push(T::ExtractAudio {
+                format: plan.output.container.clone(),
+            });
+        }
+        if class == ProcessingClass::RemuxOnly {
+            plan.transforms.push(T::Remux {
+                container: plan.output.container.clone(),
+            });
+        }
+        if matches!(
+            class,
+            ProcessingClass::VideoTranscode | ProcessingClass::FullTranscode
+        ) {
+            plan.transforms.push(T::TranscodeVideo {
+                codec: plan
+                    .output
+                    .video_codec
+                    .clone()
+                    .ok_or("Missing planned video codec")?,
+            });
+        }
+        if matches!(
+            class,
+            ProcessingClass::AudioTranscode | ProcessingClass::FullTranscode
+        ) {
+            plan.transforms.push(T::TranscodeAudio {
+                codec: plan
+                    .output
+                    .audio_codec
+                    .clone()
+                    .ok_or("Missing planned audio codec")?,
+            });
+        }
+        if let Some([start_ms, end_ms]) = plan.time_range_ms {
+            plan.transforms.push(T::Trim { start_ms, end_ms });
+        }
+        Ok(plan)
+    }
+
     pub fn plan_with_policy(
         source: &SourceMediaGraph,
         request: &AcquisitionRequest,
@@ -75,7 +129,7 @@ impl AcquisitionPlanner {
         Ok(plan)
     }
 
-    pub fn plan(
+    fn plan_base(
         source: &SourceMediaGraph,
         request: &AcquisitionRequest,
     ) -> Result<AcquisitionPlan, String> {
@@ -96,7 +150,7 @@ impl AcquisitionPlanner {
             };
             let mut plan = Self::plan(source, &clip_request)?;
             plan.operation = request.operation.clone();
-            plan.id = stable_plan_id(source, request);
+            plan.id = stable_plan_id(source, request)?;
             return Ok(plan);
         }
         if matches!(
@@ -105,9 +159,11 @@ impl AcquisitionPlanner {
         ) {
             let thumbnail = matches!(request.operation, AcquisitionOperation::ThumbnailOnly);
             return Ok(AcquisitionPlan {
+                transforms: vec![],
+                include_auto_subtitles: request.track_selection.include_auto_subtitles,
                 post_process: PostProcessPolicy::default(),
                 time_range_ms: None,
-                id: stable_plan_id(source, request),
+                id: stable_plan_id(source, request)?,
                 version: PLAN_VERSION,
                 source: SourceSummary {
                     url: source.source_url.clone(),
@@ -170,6 +226,13 @@ impl AcquisitionPlanner {
             select_audio(source, request)
         };
 
+        if let Some(wanted) = &request.track_selection.audio_language {
+            if selected_audio.and_then(|a| a.language.as_ref()) != Some(wanted) {
+                return Err(format!(
+                    "Selected format cannot supply requested audio language: {wanted}"
+                ));
+            }
+        }
         if !audio_only && selected_video.is_none() {
             return Err("The source has no usable video stream for this operation".to_string());
         }
@@ -254,17 +317,19 @@ impl AcquisitionPlanner {
             audio_codec,
             width: selected_video.map(|stream| stream.width),
             height: selected_video.map(|stream| stream.height),
-            fps: selected_video.map(|stream| stream.fps),
+            fps: selected_video.and_then(|stream| stream.fps),
             audio_only,
         };
 
         Ok(AcquisitionPlan {
+            transforms: vec![],
+            include_auto_subtitles: request.track_selection.include_auto_subtitles,
             post_process: PostProcessPolicy::default(),
             time_range_ms: match request.operation {
                 AcquisitionOperation::Clip { start_ms, end_ms } => Some([start_ms, end_ms]),
                 _ => None,
             },
-            id: stable_plan_id(source, request),
+            id: stable_plan_id(source, request)?,
             version: PLAN_VERSION,
             source: SourceSummary {
                 url: source.source_url.clone(),
@@ -291,6 +356,17 @@ impl AcquisitionPlanner {
 }
 
 fn validate_request(source: &SourceMediaGraph, request: &AcquisitionRequest) -> Result<(), String> {
+    if let Some(language) = &request.track_selection.audio_language {
+        if !source
+            .audio_streams
+            .iter()
+            .any(|s| s.language.as_ref() == Some(language))
+        {
+            return Err(format!(
+                "Requested audio language is unavailable: {language}"
+            ));
+        }
+    }
     if request.output_directory.trim().is_empty() {
         return Err("An output directory is required".to_string());
     }
@@ -381,7 +457,7 @@ fn video_quality_cmp(left: &&VideoStreamSpec, right: &&VideoStreamSpec) -> std::
     left.height
         .cmp(&right.height)
         .then_with(|| left.width.cmp(&right.width))
-        .then_with(|| left.fps.total_cmp(&right.fps))
+        .then_with(|| left.fps.unwrap_or(0.0).total_cmp(&right.fps.unwrap_or(0.0)))
         .then_with(|| left.bitrate_kbps.cmp(&right.bitrate_kbps))
 }
 
@@ -413,12 +489,6 @@ fn select_audio<'a>(
         }
         _ => candidates().max_by_key(|stream| stream.bitrate_kbps.unwrap_or(0)),
     }
-    .or_else(|| {
-        source
-            .audio_streams
-            .iter()
-            .max_by_key(|stream| stream.bitrate_kbps.unwrap_or(0))
-    })
 }
 
 fn planned_output(
@@ -452,9 +522,7 @@ fn planned_output(
             ),
             _ => {
                 let codec = audio.map(|stream| stream.codec.clone());
-                let container = audio
-                    .and_then(|stream| format_ext(source, &stream.stream_id))
-                    .unwrap_or_else(|| audio_container(codec.as_deref()));
+                let container = audio_container(codec.as_deref());
                 (container, None, codec, ProcessingClass::SourcePreserved)
             }
         };
@@ -471,6 +539,14 @@ fn planned_output(
                 (true, false) => ProcessingClass::VideoTranscode,
                 (false, true) => ProcessingClass::AudioTranscode,
                 (false, false) if streams_need_merge(video, audio) => ProcessingClass::MergeOnly,
+                (false, false)
+                    if video
+                        .and_then(|v| format_ext(source, &v.stream_id))
+                        .as_deref()
+                        != Some("mp4") =>
+                {
+                    ProcessingClass::RemuxOnly
+                }
                 _ => ProcessingClass::SourcePreserved,
             };
             (
@@ -593,14 +669,18 @@ fn estimate_size(
     })
 }
 
-fn stable_plan_id(source: &SourceMediaGraph, request: &AcquisitionRequest) -> String {
+fn stable_plan_id(
+    source: &SourceMediaGraph,
+    request: &AcquisitionRequest,
+) -> Result<String, String> {
     let mut hasher = Sha256::new();
     hasher.update(format!("acquisition-plan-v{PLAN_VERSION}:"));
-    hasher.update(serde_json::to_vec(source).unwrap_or_default());
+    hasher.update(serde_json::to_vec(source).map_err(|e| format!("Cannot serialize source: {e}"))?);
     hasher.update(b":");
-    hasher.update(serde_json::to_vec(request).unwrap_or_default());
+    hasher
+        .update(serde_json::to_vec(request).map_err(|e| format!("Cannot serialize request: {e}"))?);
     let digest = hex::encode(hasher.finalize());
-    format!("plan-v{PLAN_VERSION}-{}", &digest[..20])
+    Ok(format!("plan-v{PLAN_VERSION}-{}", &digest[..20]))
 }
 
 #[cfg(test)]
@@ -625,7 +705,7 @@ mod tests {
                     profile: None,
                     width: 2560,
                     height: 1440,
-                    fps: 60.0,
+                    fps: Some(60.0),
                     bitrate_kbps: Some(6000),
                     is_hdr: false,
                     dynamic_range: None,
@@ -638,7 +718,7 @@ mod tests {
                     profile: None,
                     width: 1920,
                     height: 1080,
-                    fps: 30.0,
+                    fps: Some(30.0),
                     bitrate_kbps: Some(3500),
                     is_hdr: false,
                     dynamic_range: None,
@@ -693,9 +773,10 @@ mod tests {
 
         let compiled = crate::presets::compile_acquisition_args(
             &plan,
-            &acquisition,
-            "https://example.com/watch/1",
-            &crate::types::AppSettings::default(),
+            &crate::presets::ExecutionContext::new(
+                &acquisition.output_directory,
+                &crate::types::AppSettings::default(),
+            ),
         )
         .unwrap();
         assert!(compiled
@@ -769,9 +850,10 @@ mod tests {
 
                 let compiled = crate::presets::compile_acquisition_args(
                     &plan,
-                    &acquisition,
-                    "https://example.com/watch/1",
-                    &settings,
+                    &crate::presets::ExecutionContext::new(
+                        &acquisition.output_directory,
+                        &settings,
+                    ),
                 )
                 .unwrap();
                 assert!(!compiled.arguments.is_empty());
@@ -794,9 +876,10 @@ mod tests {
         assert!(plan.estimated_size.is_none());
         let compiled = crate::presets::compile_acquisition_args(
             &plan,
-            &acquisition,
-            "https://example.com/video",
-            &crate::types::AppSettings::default(),
+            &crate::presets::ExecutionContext::new(
+                &acquisition.output_directory,
+                &crate::types::AppSettings::default(),
+            ),
         )
         .unwrap();
         assert!(compiled
@@ -862,9 +945,7 @@ mod tests {
             let plan = AcquisitionPlanner::plan(&source, &acquisition).unwrap();
             let compiled = crate::presets::compile_acquisition_args(
                 &plan,
-                &acquisition,
-                &source.source_url,
-                &settings,
+                &crate::presets::ExecutionContext::new(&acquisition.output_directory, &settings),
             )
             .unwrap();
             assert!(compiled
@@ -896,9 +977,10 @@ mod tests {
         assert!(changed.requirements.iter().any(|r| r.code == "FFPROBE"));
         let args = crate::presets::compile_acquisition_args(
             &first,
-            &request,
-            &source.source_url,
-            &crate::types::AppSettings::default(),
+            &crate::presets::ExecutionContext::new(
+                &request.output_directory,
+                &crate::types::AppSettings::default(),
+            ),
         )
         .unwrap()
         .arguments;

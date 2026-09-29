@@ -379,6 +379,10 @@ pub fn parse_ytdlp_json(json_text: &str, original_url: &str) -> Result<MediaMeta
             }
 
             parsed_formats.push(MediaFormatSpec {
+                language: fmt
+                    .get("language")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
                 format_id,
                 ext,
                 resolution,
