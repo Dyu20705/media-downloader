@@ -8,6 +8,7 @@ import { AcquisitionControls } from './components/AcquisitionControls';
 import { QualityAndDirectory } from './components/QualityAndDirectory';
 import { DownloadProgressState } from './components/DownloadProgressState';
 import { DownloadPlanCard } from './components/DownloadPlanCard';
+import { PlaylistIntentGuard } from './components/PlaylistIntentGuard';
 
 import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistoryModal } from './components/DownloadHistoryModal';
@@ -250,6 +251,8 @@ export const App: React.FC = () => {
             )}
           </section>
         )}
+
+        {metadata && <PlaylistIntentGuard url={url} metadata={metadata} />}
 
         {/* Orthogonal operation and output-profile selection */}
         <section aria-label="Acquisition operation and output profile">

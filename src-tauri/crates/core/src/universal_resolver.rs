@@ -4,6 +4,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::analyzer::parse_ytdlp_json;
+use crate::diagnostics::sanitize_diagnostic_text;
 use crate::tools::ToolResolver;
 use crate::types::{
     AppSettings, DownloadStrategy, MediaCapabilities, MediaKind, MediaMetadata, MediaSourceType,
@@ -445,6 +446,7 @@ impl UniversalResolver {
             Command::new(&ytdlp_tool.path)
                 .arg("-J")
                 .arg("--flat-playlist")
+                .arg("--no-playlist")
                 .arg("--no-warnings")
                 .arg("--user-agent")
                 .arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
@@ -467,7 +469,7 @@ impl UniversalResolver {
                 .find(|l| l.contains("ERROR:"))
                 .unwrap_or_else(|| stderr_err.lines().next().unwrap_or("Analysis failed"))
                 .trim();
-            return Err(first_err.to_string());
+            return Err(sanitize_diagnostic_text(first_err));
         }
 
         let json_text = String::from_utf8_lossy(&output.stdout);

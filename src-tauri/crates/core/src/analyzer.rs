@@ -1,3 +1,4 @@
+use crate::diagnostics::sanitize_diagnostic_text;
 use crate::tools::ToolResolver;
 use crate::types::{
     FormatRecommendation, MediaChapter, MediaFormatSpec, MediaKind, MediaMetadata, PresetType,
@@ -25,6 +26,7 @@ pub async fn analyze_media_metadata(
     let output = Command::new(&ytdlp_tool.path)
         .arg("-J")
         .arg("--flat-playlist")
+        .arg("--no-playlist")
         .arg("--no-warnings")
         .arg(&valid_url)
         .output()
@@ -43,7 +45,10 @@ pub async fn analyze_media_metadata(
                     .unwrap_or("Unknown analysis failure"),
             )
             .trim();
-        return Err(format!("yt-dlp analysis error: {}", first_err));
+        return Err(format!(
+            "yt-dlp analysis error: {}",
+            sanitize_diagnostic_text(first_err)
+        ));
     }
 
     let json_text = String::from_utf8_lossy(&output.stdout);
