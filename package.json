@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
+    "check:ci": "node scripts/ci/check-boundaries.mjs",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "bindings": "UPDATE_BINDINGS=1 cargo test --manifest-path src-tauri/crates/core/Cargo.toml ipc_bindings_are_current"
@@ -31,5 +32,8 @@
     "typescript": "^5.7.3",
     "vite": "^6.1.0",
     "vitest": "^3.2.7"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
   }
 }

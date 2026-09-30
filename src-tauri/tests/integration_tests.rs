@@ -112,6 +112,7 @@ fn test_metadata_parsing_from_ytdlp_json() {
 }
 
 #[tokio::test]
+#[ignore = "manual live-provider smoke test; not deterministic for pull-request CI"]
 async fn test_real_ytdlp_metadata_analysis_integration() {
     let resolver = Arc::new(ToolResolver::new());
     if resolver.resolve_tool("yt-dlp").await.is_none() {
