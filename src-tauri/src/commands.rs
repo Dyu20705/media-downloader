@@ -27,11 +27,9 @@ pub async fn resolve_media(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<ResolvedMediaSource, String> {
-    state.diagnostics.log(
-        "INFO",
-        "RESOLVER",
-        &format!("Universal resolving URL: {}", url),
-    );
+    state
+        .diagnostics
+        .log("INFO", "RESOLVER", "Resolving user-provided media URL");
     let resolver = UniversalResolver::with_settings(
         Arc::clone(&state.tool_resolver),
         state.settings.get_settings(),
@@ -55,7 +53,7 @@ pub async fn analyze_media(
 ) -> Result<MediaMetadata, String> {
     state
         .diagnostics
-        .log("INFO", "IPC", &format!("Analyzing URL: {}", url));
+        .log("INFO", "IPC", "Analyzing user-provided media URL");
     let resolver = UniversalResolver::with_settings(
         Arc::clone(&state.tool_resolver),
         state.settings.get_settings(),
