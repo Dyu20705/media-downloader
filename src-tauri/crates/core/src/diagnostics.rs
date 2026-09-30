@@ -81,7 +81,8 @@ impl DiagnosticsBuffer {
 }
 
 pub fn sanitize_diagnostic_text(text: &str) -> String {
-    // Redact common auth tokens, passwords, cookies, URL query strings, and private headers.
+    // Redact credentials and normalize URLs to their origin. Paths can contain signed or
+    // account-specific components just as easily as query parameters can.
     let mut result = text.to_string();
 
     let sensitive_patterns = [
@@ -96,9 +97,21 @@ pub fn sanitize_diagnostic_text(text: &str) -> String {
         ("(?i)sig=[a-zA-Z0-9_\\-\\.]+", "sig=[REDACTED]"),
         ("(?i)signature=[a-zA-Z0-9_\\-\\.]+", "signature=[REDACTED]"),
         ("(?i)token=[a-zA-Z0-9_\\-\\.]+", "token=[REDACTED]"),
-        ("(?i)(https?://)[^/@\\s?#]+@", "$1[REDACTED]@"),
-        ("(?i)(https?://[^\\s?#]+)\\?[^\\s#]+", "$1?[REDACTED]"),
     ];
+
+    let url_pattern = regex::Regex::new(r#"(?i)https?://[^\s<>\"']+"#).expect("valid URL pattern");
+    result = url_pattern
+        .replace_all(&result, |captures: &regex::Captures<'_>| {
+            let raw = captures.get(0).map(|m| m.as_str()).unwrap_or_default();
+            let trimmed = raw.trim_end_matches(|ch: char| ".,;:!?)]}]".contains(ch));
+            let suffix = &raw[trimmed.len()..];
+            let normalized = url::Url::parse(trimmed)
+                .ok()
+                .map(|parsed| format!("{}/[REDACTED]", parsed.origin().ascii_serialization()))
+                .unwrap_or_else(|| "https://[REDACTED]".to_string());
+            format!("{normalized}{suffix}")
+        })
+        .to_string();
 
     for (pattern, replacement) in sensitive_patterns {
         if let Ok(re) = regex::Regex::new(pattern) {
@@ -124,11 +137,12 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitization_redacts_entire_media_url_query() {
+    fn test_sanitization_normalizes_url_and_redacts_credentials_query_fragment_and_path() {
         let dirty = "Provider error for https://user:password@media.example/video?X-Amz-Credential=account%2Fscope&custom_auth=secret-value&part=audio";
         let cleaned = sanitize_diagnostic_text(dirty);
 
-        assert!(cleaned.contains("https://[REDACTED]@media.example/video?[REDACTED]"));
+        assert!(cleaned.contains("https://media.example/[REDACTED]"));
+        assert!(!cleaned.contains("/video"));
         assert!(!cleaned.contains("user:password"));
         assert!(!cleaned.contains("account%2Fscope"));
         assert!(!cleaned.contains("secret-value"));
@@ -136,12 +150,21 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitization_redacts_url_fragment_secrets() {
+        let cleaned =
+            sanitize_diagnostic_text("https://example.com/watch#access_token=fragment-secret");
+        assert_eq!(cleaned, "https://example.com/[REDACTED]");
+        assert!(!cleaned.contains("fragment-secret"));
+    }
+
+    #[test]
     fn test_sanitization_redacts_complete_auth_headers() {
-        let dirty = "Authorization: Bearer secret-token\nCookie: session=secret-cookie\nX-Api-Key: secret-api-key";
+        let dirty = "Authorization: Bearer secret-token extra\nCookie: session=secret-cookie; other=secret\nX-Api-Key: secret-api-key";
         let cleaned = sanitize_diagnostic_text(dirty);
 
         assert!(!cleaned.contains("secret-token"));
         assert!(!cleaned.contains("secret-cookie"));
+        assert!(!cleaned.contains("other=secret"));
         assert!(!cleaned.contains("secret-api-key"));
     }
 
