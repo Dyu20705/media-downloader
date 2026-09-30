@@ -20,6 +20,7 @@ import {
   DownloadRecipe,
   VerificationResult,
 } from '../types';
+import { PlanActualComparison } from './PlanActualComparison';
 
 interface AcquisitionReceiptProps {
   job: DownloadJob;
@@ -40,12 +41,13 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
   const fingerprint = job.fingerprint;
   const recipe = job.recipe;
   const isVerified = verification?.isValid === true;
+  const sidecar = ['THUMBNAIL_ONLY', 'SUBTITLES_ONLY'].includes(job.acquisitionPlan.operation.type);
   const verificationChecks = [
     ['File Output Exists', verification?.checklist.fileExists === true],
     ['File Size Valid', verification?.checklist.fileSizeValid === true],
-    ['Duration Detected', verification?.checklist.durationValid === true],
-    ['Video Stream Valid', verification?.checklist.videoStreamValid === true],
-    ['Audio Stream Valid', verification?.checklist.audioStreamValid === true],
+    [sidecar ? 'Duration: not applicable' : 'Duration Detected', verification?.checklist.durationValid === true],
+    [job.acquisitionPlan.operation.type === 'SUBTITLES_ONLY' ? 'Video: not applicable' : 'Video / Image Valid', verification?.checklist.videoStreamValid === true],
+    [sidecar ? 'Audio: not applicable' : 'Audio Stream Valid', verification?.checklist.audioStreamValid === true],
     ['Container Valid', verification?.checklist.containerValid === true],
   ] as const;
 
@@ -131,6 +133,10 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
         </div>
       </div>
 
+      {job.inspection && (
+        <PlanActualComparison plan={job.acquisitionPlan} inspection={job.inspection} verification={job.verification} />
+      )}
+
       {/* Processing Explanation */}
       {explainable && (
         <div className="bg-slate-950/50 rounded-xl p-3.5 border border-slate-800/80 mb-4">
@@ -138,7 +144,7 @@ export const AcquisitionReceipt: React.FC<AcquisitionReceiptProps> = ({
             Processing Summary
           </div>
           <p className="text-sm font-medium text-slate-200 mb-2">
-            {explainable.processingSummary}
+            {sidecar ? job.acquisitionPlan.processing.steps.join('; ') : explainable.processingSummary}
           </p>
 
           {explainable.whyReasons && explainable.whyReasons.length > 0 && (

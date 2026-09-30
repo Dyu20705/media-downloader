@@ -33,6 +33,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::resolve_media,
             commands::analyze_media,
+            commands::plan_acquisition,
             commands::build_command,
             commands::start_download,
             commands::cancel_download,

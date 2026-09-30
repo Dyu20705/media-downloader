@@ -1,20 +1,23 @@
 # One-Click Media Downloader — User Cheatsheet & Guide
 
-This cheatsheet provides a clear, technical reference for presets, formats, quality options, tool management, advanced configuration, and troubleshooting.
+This cheatsheet provides a clear, technical reference for acquisition operations, output profiles, quality options, tool management, advanced configuration, and troubleshooting.
 
 ---
 
-## 1. Preset Intent Guide
+## 1. Operation and Output Profile Guide
 
-Choose the preset that matches your goal:
+First choose what to acquire, then independently choose how the output should behave.
 
-| Preset | Container / Format | Audio / Video Codec | Recommended Use Case |
-| :--- | :--- | :--- | :--- |
-| **MP4 (Compatible)** | `.mp4` | H.264 (AVC) + AAC | **Default choice for videos.** Plays smoothly on virtually all TVs, smartphones, tablets, browsers, and editing software (Premiere, Final Cut, DaVinci). |
-| **Best Video** | `.mkv` | VP9 / AV1 / H.265 (Source) + Opus / AAC | **Maximum visual quality.** Retains 4K, 8K, HDR, high frame rates (60fps), and uncompressed metadata in a flexible Matroska container. |
-| **Best Audio** | Source-dependent | Source audio where practical | **Source-preserving audio extraction.** Avoids an unnecessary lossy-to-lossy conversion; the codec and extension depend on the selected source. |
-| **MP3 (Universal)** | `.mp3` | MP3 (lossy VBR) | **Universal compatibility for audio.** Uses the encoder's highest-quality VBR setting but cannot improve the source stream. |
-| **FLAC Output** | `.flac` | FLAC | **Format-specific audio output.** FLAC encoding is lossless at that stage, but transcoding a lossy source cannot restore discarded information. |
+| Dimension | Choice | Meaning |
+| :--- | :--- | :--- |
+| **Operation** | Entire Media | Acquire the complete selected video and audio streams. |
+| **Operation** | Audio Only | Acquire audio without the video stream. |
+| **Output Profile** | Best Source | Preserve the strongest suitable source streams and avoid unnecessary transcoding. |
+| **Output Profile** | Universal | Prefer broad playback compatibility; Audio Only produces MP3. |
+| **Output Profile** | Editing | Produce an editing-friendly output; Audio Only produces FLAC. |
+| **Output Profile** | Small | Select the smallest suitable source streams. |
+
+Clip and Chapter perform fast time-range cuts; boundaries can align to nearby keyframes. Thumbnail exports JPEG. Subtitles exports one selected WebVTT language per job with optional automatic captions. Image and subtitle exports use separate per-job folders and ignore media output profiles.
 
 ---
 
@@ -76,6 +79,6 @@ One-Click Media Downloader manages required external helper tools in an isolated
 
 - `Ctrl + V`: Paste URL into the input field.
 - `Enter` (in URL field): Trigger media analysis.
-- `Tab` / `Shift + Tab`: Navigate cleanly across controls in order: `URL → Analyze → Format → Quality → Folder → Download`.
-- `Space` / `Enter`: Activate buttons or select format chips.
+- `Tab` / `Shift + Tab`: Navigate cleanly across controls in order: `URL → Analyze → Operation → Profile → Quality → Folder → Download`.
+- `Space` / `Enter`: Activate buttons or select operation/profile choices.
 - `Escape`: Close any open dialog, modal, or drawer.

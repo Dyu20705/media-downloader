@@ -3,13 +3,15 @@ use tauri::State;
 
 use crate::core::diagnostics::DiagnosticsBuffer;
 use crate::core::download_manager::DownloadManager;
-use crate::core::presets::compile_download_args;
+use crate::core::execution::compile_acquisition_args;
+use crate::core::media_graph::MediaGraph;
+use crate::core::planner::AcquisitionPlanner;
 use crate::core::settings::SettingsManager;
 use crate::core::tools::ToolResolver;
 use crate::core::types::{
-    AppSettings, BuildCommandRequest, BuildCommandResponse, DiagnosticLog, DownloadJob,
-    MediaMetadata, ResolvedMediaSource, StartDownloadRequest, ToolHealth, ToolStatusInfo,
-    ToolsManifest,
+    AcquisitionPlan, AcquisitionRequest, AppSettings, BuildCommandRequest, BuildCommandResponse,
+    DiagnosticLog, DownloadJob, MediaMetadata, ResolvedMediaSource, StartDownloadRequest,
+    ToolHealth, ToolStatusInfo, ToolsManifest,
 };
 use crate::core::universal_resolver::UniversalResolver;
 
@@ -69,6 +71,20 @@ pub async fn analyze_media(
 }
 
 #[tauri::command]
+pub async fn plan_acquisition(
+    metadata: MediaMetadata,
+    acquisition: AcquisitionRequest,
+    state: State<'_, AppState>,
+) -> Result<AcquisitionPlan, String> {
+    let graph = MediaGraph::build_source_graph(&metadata, metadata.source_type.unwrap_or_default());
+    AcquisitionPlanner::plan_with_policy(
+        &graph,
+        &acquisition,
+        (&state.settings.get_settings()).into(),
+    )
+}
+
+#[tauri::command]
 pub async fn build_command(
     request: BuildCommandRequest,
     state: State<'_, AppState>,
@@ -77,15 +93,35 @@ pub async fn build_command(
         .settings
         .unwrap_or_else(|| state.settings.get_settings());
 
-    let compiled = compile_download_args(
-        request.preset,
-        &request.quality,
-        &request.output_directory,
-        &request.url,
-        &settings,
+    let graph = MediaGraph::build_source_graph(
+        &request.metadata,
+        request.metadata.source_type.unwrap_or_default(),
     );
+    let plan =
+        AcquisitionPlanner::plan_with_policy(&graph, &request.acquisition, (&settings).into())?;
+    let compiled = compile_acquisition_args(
+        &plan,
+        &crate::core::execution::ExecutionContext::new(
+            &request.acquisition.output_directory,
+            &settings,
+        ),
+    )?;
 
-    let full_display = format!("yt-dlp {}", compiled.arguments.join(" "));
+    // Argument vectors are displayed as JSON, not as a shell command.
+    let mut full_display = format!(
+        "yt-dlp {}",
+        serde_json::to_string_pretty(&compiled.arguments).map_err(|e| e.to_string())?
+    );
+    if let Some(transform) = &compiled.finalize {
+        let arguments = transform.arguments(
+            std::path::Path::new("<downloaded-file>"),
+            std::path::Path::new(&format!("<verified-output>.{}", transform.container)),
+        );
+        full_display.push_str(&format!(
+            "\n\nffmpeg {}",
+            serde_json::to_string_pretty(&arguments).map_err(|e| e.to_string())?
+        ));
+    }
 
     Ok(BuildCommandResponse {
         command: full_display,

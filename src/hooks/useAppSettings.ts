@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ipc } from '../services/ipc';
-import type { AppSettings, PresetType, UserIntent } from '../types';
+import type { AcquisitionOperation, AppSettings, OutputProfile, UserIntent } from '../types';
+import { selectionFromPreset } from '../acquisition';
 
 const DEFAULT_SETTINGS: AppSettings = {
   downloadDirectory: '',
@@ -25,7 +26,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [outputDirectory, setOutputDirectory] = useState('');
-  const [preset, setPreset] = useState<PresetType>('mp4-compatible');
+  const [operation, setOperation] = useState<AcquisitionOperation>({ type: 'ENTIRE_MEDIA' });
+  const [outputProfile, setOutputProfile] = useState<OutputProfile>('UNIVERSAL');
   const [quality, setQuality] = useState('auto');
   const [intent] = useState<UserIntent>('balanced');
 
@@ -35,7 +37,9 @@ export function useAppSettings() {
       if (!active) return;
       setSettings(loaded);
       setOutputDirectory(loaded.downloadDirectory);
-      setPreset(loaded.lastPreset);
+      const selection = selectionFromPreset(loaded.lastPreset);
+      setOperation(selection.operation);
+      setOutputProfile(selection.outputProfile);
       setQuality(loaded.defaultQuality);
     }).catch(() => {
       // The UI remains usable with safe defaults if settings cannot be read.
@@ -49,7 +53,9 @@ export function useAppSettings() {
     ipc.saveSettings(next).then((saved) => {
       setSettings(saved);
       setOutputDirectory(saved.downloadDirectory);
-      setPreset(saved.lastPreset);
+      const selection = selectionFromPreset(saved.lastPreset);
+      setOperation(selection.operation);
+      setOutputProfile(selection.outputProfile);
       setQuality(saved.defaultQuality);
     }).catch(() => {
       // Keep the last confirmed settings when persistence fails.
@@ -60,8 +66,10 @@ export function useAppSettings() {
     settings,
     outputDirectory,
     setOutputDirectory,
-    preset,
-    setPreset,
+    operation,
+    setOperation,
+    outputProfile,
+    setOutputProfile,
     quality,
     setQuality,
     intent,

@@ -1,25 +1,31 @@
 import { useCallback, useMemo, useState } from 'react';
 import type {
   FormatRecommendation,
+  AcquisitionOperation,
   MediaMetadata,
-  PresetType,
+  OutputProfile,
   UserIntent,
 } from '../types';
+import { selectionFromPreset } from '../acquisition';
 
 interface RecommendationOptions {
   metadata: MediaMetadata | null;
   intent: UserIntent;
-  preset: PresetType;
+  operation: AcquisitionOperation;
+  outputProfile: OutputProfile;
   quality: string;
-  setPreset: (preset: PresetType) => void;
+  setOperation: (operation: AcquisitionOperation) => void;
+  setOutputProfile: (profile: OutputProfile) => void;
   setQuality: (quality: string) => void;
 }
 
 export function useRecommendation({
   metadata,
-  preset,
+  operation,
+  outputProfile,
   quality,
-  setPreset,
+  setOperation,
+  setOutputProfile,
   setQuality,
 }: RecommendationOptions) {
   const [appliedSignature, setAppliedSignature] = useState<string | null>(null);
@@ -27,20 +33,26 @@ export function useRecommendation({
   const signature = currentRecommendation
     ? `${currentRecommendation.preset}:${currentRecommendation.targetQuality}`
     : null;
+  const recommendedSelection = currentRecommendation
+    ? selectionFromPreset(currentRecommendation.preset)
+    : null;
 
   const handleApplyRecommendation = useCallback(() => {
     if (!currentRecommendation) return;
-    setPreset(currentRecommendation.preset);
+    const selection = selectionFromPreset(currentRecommendation.preset);
+    setOperation(selection.operation);
+    setOutputProfile(selection.outputProfile);
     setQuality(currentRecommendation.targetQuality || 'auto');
     setAppliedSignature(signature);
-  }, [currentRecommendation, setPreset, setQuality, signature]);
+  }, [currentRecommendation, setOperation, setOutputProfile, setQuality, signature]);
 
   const isRecommendationApplied = useMemo(() => {
     if (!currentRecommendation || !signature) return false;
     return appliedSignature === signature
-      && preset === currentRecommendation.preset
+      && operation.type === recommendedSelection?.operation.type
+      && outputProfile === recommendedSelection?.outputProfile
       && quality === (currentRecommendation.targetQuality || 'auto');
-  }, [appliedSignature, currentRecommendation, preset, quality, signature]);
+  }, [appliedSignature, currentRecommendation, operation.type, outputProfile, quality, recommendedSelection, signature]);
 
   return {
     currentRecommendation: currentRecommendation as FormatRecommendation | null,

@@ -31,7 +31,7 @@ export const HelpCheatsheetModal: React.FC<HelpCheatsheetModalProps> = ({
                 Help & Cheatsheet
               </h2>
               <p className="text-xs text-zinc-400">
-                Quick guide for format presets, quality, and tools
+                Quick guide for operations, output profiles, quality, and tools
               </p>
             </div>
           </div>
@@ -49,32 +49,32 @@ export const HelpCheatsheetModal: React.FC<HelpCheatsheetModalProps> = ({
 
         {/* Content */}
         <div className="p-6 overflow-y-auto space-y-6 text-sm text-zinc-300 leading-relaxed">
-          {/* Format Presets Guide */}
+          {/* Operation and profile guide */}
           <section className="space-y-2.5">
             <h3 className="font-semibold text-zinc-100 flex items-center gap-2 text-sm">
               <FileText className="w-4 h-4 text-blue-400" aria-hidden="true" />
-              <span>Format Presets Guide</span>
+              <span>Operation × Output Profile</span>
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                <div className="font-semibold text-zinc-100">MP4 (Compatible)</div>
-                <div className="text-zinc-400">H.264 + AAC. Compatible with virtually all TVs, phones, tablets, and editing suites.</div>
+                <div className="font-semibold text-zinc-100">Entire Media</div>
+                <div className="text-zinc-400">Acquire the selected video and audio streams for the complete item.</div>
               </div>
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                <div className="font-semibold text-zinc-100">Best Video</div>
-                <div className="text-zinc-400">Preserves highest resolution (4K/8K, 60fps, HDR) in an MKV container.</div>
+                <div className="font-semibold text-zinc-100">Audio Only</div>
+                <div className="text-zinc-400">Acquire audio without the video stream. The profile controls preservation or conversion.</div>
               </div>
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                <div className="font-semibold text-zinc-100">Best Audio</div>
-                <div className="text-zinc-400">Preserves the best available source audio format when possible, without an unnecessary lossy transcode.</div>
+                <div className="font-semibold text-zinc-100">Best Source</div>
+                <div className="text-zinc-400">Preserves the strongest selected source streams and avoids unnecessary transcoding.</div>
               </div>
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                <div className="font-semibold text-zinc-100">MP3</div>
-                <div className="text-zinc-400">Compatibility-oriented lossy output using the encoder's highest-quality VBR setting.</div>
+                <div className="font-semibold text-zinc-100">Universal</div>
+                <div className="text-zinc-400">Prioritizes broad playback compatibility. Audio-only Universal creates MP3 output.</div>
               </div>
               <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1">
-                <div className="font-semibold text-zinc-100">FLAC</div>
-                <div className="text-zinc-400">FLAC encoding is lossless, but it cannot restore information missing from a lossy source.</div>
+                <div className="font-semibold text-zinc-100">Editing / Small</div>
+                <div className="text-zinc-400">Editing chooses an editing-friendly output; Small selects the smallest suitable source streams.</div>
               </div>
             </div>
           </section>
@@ -86,7 +86,7 @@ export const HelpCheatsheetModal: React.FC<HelpCheatsheetModalProps> = ({
               <span>Quality Settings</span>
             </h3>
             <p className="text-xs text-zinc-400">
-              When using video presets, you can choose a maximum ceiling resolution. The engine will download the highest available stream matching or below your selection:
+              For video operations, you can choose a maximum resolution ceiling. The backend planner selects the appropriate available stream at or below it:
             </p>
             <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-xs space-y-1 font-mono text-zinc-300">
               <div>• Auto: Best available stream from host (up to 4K/8K)</div>

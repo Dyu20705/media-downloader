@@ -24,6 +24,7 @@ interface DownloadProgressStateProps {
   onReset: () => void;
   onOpenDetails: (job: DownloadJob) => void;
   onOpenDiagnostics: () => void;
+  planReady?: boolean;
 }
 
 export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
@@ -36,6 +37,7 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
   onReset,
   onOpenDetails,
   onOpenDiagnostics,
+  planReady = true,
 }) => {
   const handleOpenFile = async () => {
     if (activeJob?.finalFilePath) {
@@ -121,13 +123,17 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
               {activeJob.errorMessage}
             </p>
           )}
+          {activeJob.inspection && activeJob.verification && (
+            <AcquisitionReceipt job={activeJob} onOpenFile={handleOpenFile} onOpenDirectory={handleOpenFolder} />
+          )}
 
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
               id="btn-try-again-failed"
               onClick={onStartDownload}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+              disabled={!planReady}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Try again</span>
@@ -173,7 +179,8 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
             type="button"
             id="btn-try-again-cancelled"
             onClick={onStartDownload}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+            disabled={!planReady}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Try again</span>
@@ -246,12 +253,13 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
           type="button"
           id="btn-primary-download"
           onClick={onStartDownload}
-          className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-base rounded-xl shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer flex items-center justify-center gap-2"
+          disabled={!planReady}
+          className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-semibold text-base rounded-xl shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer flex items-center justify-center gap-2"
         >
           <span>Download</span>
         </button>
         <p className="text-center text-xs text-zinc-400" role="status">
-          Ready to download
+          {planReady ? 'Plan ready · review the source and planned output above' : 'Waiting for a valid download plan'}
         </p>
       </div>
     );

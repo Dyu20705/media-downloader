@@ -7,9 +7,9 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    React 18 + TypeScript UI                 │
-│  (Single-View Workspace, Format Presets, 4Hz Live Telemetry)│
+│ (Operation × Output Profile, Plan UI, 4Hz Live Telemetry)   │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ Typed Tauri IPC / SSE Events
+                               │ Typed Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐
 │                   Tauri 2 / Rust Core Core                  │
 │ ┌───────────────────────┐         ┌───────────────────────┐ │
@@ -41,15 +41,17 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 - **`state_machine.rs`**: Strict validated transitions:
   `IDLE → ANALYZING → READY → DOWNLOADING → POST_PROCESSING → VERIFYING → COMPLETED | FAILED | CANCELLED`.
 - **`download_manager.rs`**: Single-download concurrency lock, 4 Hz UI telemetry throttling, process tree lifecycle management, post-download verification.
+- **`planner.rs`**: Authoritative `SourceMediaGraph + AcquisitionRequest → AcquisitionPlan` resolution, including exact stream selection, planned output, processing class, estimates, warnings, and tool requirements.
 - **`media_verifier.rs`**: Verification using `ffprobe` / `MediaInfo` checking container headers, duration, stream count, and codec specs.
 - **`settings.rs`**: Atomic settings persistence with `.tmp` staging, `.bak` backup copy, corruption recovery, and schema verification.
 - **`diagnostics.rs`**: Bounded 256-entry ring buffer with <= 64 KiB memory ceiling, sanitizing auth tokens, cookies, passwords, and sensitive URLs.
 
 ### 2.2 Frontend (`src/`)
-- **`App.tsx`**: Single-view master workspace container, zero-polling SSE / Tauri event subscriptions, lazy-loading secondary dialogs (Settings, Diagnostics, Tools, History, MediaInfo).
+- **`App.tsx`**: Single-view master workspace container and secondary-dialog coordinator (Settings, Diagnostics, Tools, History, MediaInfo).
 - **`components/UrlInputBar.tsx`**: URL input with clear button, analyze action, and keyboard shortcuts.
 - **`components/MediaSummaryCard.tsx`**: High-contrast summary display showing title, duration, author, and source link.
-- **`components/FormatSelector.tsx`**: One-click format preset cards (`mp4-compatible`, `best-video`, `best-audio`, `mp3-universal`, `flac-lossless`).
+- **`components/AcquisitionControls.tsx`**: Orthogonal operation and output-profile controls, with unavailable operations explicitly disabled until an executor exists.
+- **`components/DownloadPlanCard.tsx`**: Backend-authoritative source selection, planned output, processing, estimates, requirements, and warnings.
 - **`components/QualityAndDirectory.tsx`**: Target resolution selector and destination folder picker.
 - **`components/DownloadProgressState.tsx`**: Responsive progress bar, download speed, ETA, and cancellation triggers.
 
@@ -58,6 +60,6 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 ## 3. Strict Concurrency & Memory Guarantees
 
 1. **Max Concurrency = 1**: The application strictly enforces a single concurrent active download job to prevent disk thrashing and bandwidth contention.
-2. **Zero Polling**: Replaces timer polling with push-based Tauri IPC events or SSE streams.
+2. **Bounded Polling**: React polls the active job every 400 ms while work is active; Rust coalesces process progress updates to at most 4 Hz.
 3. **Bounded Telemetry**: Progress events are throttled to a maximum frequency of 4 Hz (250 ms), maintaining 60 FPS UI responsiveness.
 4. **No Media Bytes in Memory**: Stream media writes directly to disk; never buffers raw video/audio chunks in React or Rust memory buffers.

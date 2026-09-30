@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type {
   AppSettings,
+  AcquisitionPlan,
+  AcquisitionRequest,
   BuildCommandRequest,
   BuildCommandResponse,
   DiagnosticLog,
@@ -14,6 +16,8 @@ import type {
 
 export const ipc = {
   analyzeMedia: (url: string) => invoke<MediaMetadata>('analyze_media', { url }),
+  planAcquisition: (metadata: MediaMetadata, acquisition: AcquisitionRequest) =>
+    invoke<AcquisitionPlan>('plan_acquisition', { metadata, acquisition }),
   buildCommand: (request: BuildCommandRequest) =>
     invoke<BuildCommandResponse>('build_command', { request }),
   startDownload: (request: StartDownloadRequest) =>

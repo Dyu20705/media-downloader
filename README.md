@@ -1,6 +1,6 @@
 # One-Click Media Downloader
 
-> Production-grade desktop media downloader powered by Tauri 2, Rust, React 18, yt-dlp, FFmpeg, and MediaInfo.
+> Desktop media downloader in development powered by Tauri 2, Rust, React 18, yt-dlp, FFmpeg, and MediaInfo.
 
 ---
 
@@ -12,16 +12,14 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
 
 ## Features
 
-- **Simple & Intuitive Workflow**: Paste URL → Select Preset & Format → Choose Destination → Download.
-- **Automated Tool Management**: Self-manages and cryptographically verifies `yt-dlp`, `FFmpeg`, `FFprobe`, and `MediaInfo` binaries without modifying system PATH.
-- **Rich Format Presets**:
-  - **MP4 (Compatible)**: Universal H.264/AAC playback.
-  - **Best Video**: Highest available resolution (up to 4K/8K).
-  - **Best Audio**: Preserves the best available source audio stream when possible (for example Opus/AAC) without unnecessary re-encoding.
-  - **MP3**: Compatibility-focused MP3 output using the encoder's highest-quality VBR setting. This is a lossy transcode and cannot improve the source stream.
-  - **FLAC**: FLAC output for workflows that require the format. Converting a lossy source to FLAC does not restore information already lost in the source.
-- **Deep Media Verification**: Real-time post-download inspection ensuring valid video/audio streams, duration, bitrate, and headers.
-- **Secure by Design**: Isolated subprocess execution without shell interpolation, path traversal prevention, and strict sanitization.
+- **Simple & Intuitive Workflow**: Paste URL → Choose an operation and output profile → Review the authoritative plan → Download.
+- **Tool Management**: Managed installs use checksum validation and OS/architecture-specific artifacts; custom executable paths are supported. See [current platform limitations](CURRENT-STATE.md#tool-management).
+- **Orthogonal Acquisition Controls**:
+  - **Operation** chooses what to acquire: Entire Media, Audio Only, Clip, Chapter, Thumbnail (JPEG), or Subtitles (one WebVTT language per job, optionally automatic captions).
+  - **Output Profile** independently chooses how output should behave: Best Source, Universal, Editing, or Small.
+  - The backend-generated plan shows exact selected streams, output shape, processing, requirements, and warnings before download.
+- **Plan Verification**: The backend compares inspected codecs, container, dimensions, FPS and duration against the reviewed plan; mismatches are shown in the receipt.
+- **Runtime checks**: Subprocess execution without shell interpolation, URL/DNS preflight and bounded diagnostics. See [security boundaries](CURRENT-STATE.md#state-and-boundaries).
 
 ---
 
@@ -35,10 +33,12 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ & npm
-- Rust 1.75+
+
+- Node.js 22 & npm
+- Current stable Rust toolchain
 
 ### Development
+
 ```bash
 # Install dependencies
 npm install
@@ -48,6 +48,7 @@ npm run tauri dev
 ```
 
 ### Production Build
+
 ```bash
 # Build desktop binary and installer
 npm run tauri build
@@ -56,6 +57,8 @@ npm run tauri build
 ---
 
 ## Documentation
+
+- [Current state, validation and limitations](CURRENT-STATE.md)
 
 - [Architecture Overview](docs/architecture.md)
 - [Universal Media Resolver](docs/universal-resolver.md)

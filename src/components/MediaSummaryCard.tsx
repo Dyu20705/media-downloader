@@ -112,8 +112,8 @@ export const MediaSummaryCard: React.FC<MediaSummaryCardProps> = ({ metadata, on
   // Derive smart stream codecs
   const videoCodecSummary = isAudio 
     ? null 
-    : metadata.formats?.find(f => f.vcodec && f.vcodec !== 'none')?.vcodec?.split('.')[0]?.toUpperCase() || (highestRes && highestRes >= 1440 ? 'AV1 / VP9' : 'H.264');
-  const audioCodecSummary = metadata.formats?.find(f => f.acodec && f.acodec !== 'none')?.acodec?.split('.')[0]?.toUpperCase() || (isAudio ? 'Source Audio' : 'AAC / Opus');
+    : metadata.formats?.find(f => f.vcodec && f.vcodec !== 'none')?.vcodec?.split('.')[0]?.toUpperCase() || 'Unknown';
+  const audioCodecSummary = metadata.formats?.find(f => f.acodec && f.acodec !== 'none')?.acodec?.split('.')[0]?.toUpperCase() || 'Unknown';
 
   const getPlatformGradient = (extractorKey?: string | null, extractor?: string | null, sourceType?: string | null): string => {
     const key = (extractorKey || extractor || sourceType || '').toLowerCase();

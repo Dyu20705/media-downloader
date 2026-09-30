@@ -53,7 +53,7 @@ The **Universal Media Resolver** transforms One-Click Media Downloader from a si
 * `STREAM_COPY`: Zero quality loss, near-instant disk throughput.
 * `REMUX`: Container rewrite only (zero video/audio re-encoding).
 * `MERGE`: Native track multiplexing (e.g. 4K VP9 + Opus -> MKV).
-* `TRANSCODE`: CPU/GPU heavy re-encoding (only when explicitly requested by format preset).
+* `TRANSCODE`: CPU/GPU heavy re-encoding (only when required by the selected output profile).
 
 ---
 

@@ -17,14 +17,19 @@ impl MediaGraph {
         if let Some(formats) = &metadata.formats {
             for f in formats {
                 if let (Some(w), Some(h)) = (f.width, f.height) {
-                    if w > 0 && h > 0 {
+                    if w > 0
+                        && h > 0
+                        && f.vcodec
+                            .as_deref()
+                            .is_some_and(|codec| !codec.eq_ignore_ascii_case("none"))
+                    {
                         video_streams.push(VideoStreamSpec {
                             stream_id: f.format_id.clone(),
                             codec: f.vcodec.clone().unwrap_or_else(|| "unknown".to_string()),
                             profile: None,
                             width: w,
                             height: h,
-                            fps: f.fps.unwrap_or(30.0),
+                            fps: f.fps.filter(|fps| fps.is_finite() && *fps > 0.0),
                             bitrate_kbps: f.vbr.or(f.tbr).map(|b| b as u64),
                             is_hdr: f.hdr.unwrap_or(false),
                             dynamic_range: f.dynamic_range.clone(),
@@ -36,12 +41,16 @@ impl MediaGraph {
 
                 if f.acodec.is_some() && f.acodec.as_deref() != Some("none") {
                     audio_streams.push(AudioStreamSpec {
+                        is_audio_only: f
+                            .vcodec
+                            .as_deref()
+                            .is_some_and(|codec| codec.eq_ignore_ascii_case("none")),
                         stream_id: f.format_id.clone(),
                         codec: f.acodec.clone().unwrap_or_else(|| "unknown".to_string()),
                         bitrate_kbps: f.abr.map(|b| b as u64),
                         sample_rate_hz: f.audio_sample_rate,
                         channels: f.audio_channels,
-                        language: None,
+                        language: f.language.clone(),
                         is_default: false,
                         filesize_approx: f.filesize_approx.or(f.filesize),
                     });
@@ -72,7 +81,27 @@ impl MediaGraph {
             duration_seconds: metadata.duration,
             video_streams,
             audio_streams,
-            subtitle_streams: metadata.subtitles.clone().unwrap_or_default(),
+            subtitle_streams: metadata
+                .subtitles
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|mut t| {
+                    t.is_auto = Some(false);
+                    t
+                })
+                .chain(
+                    metadata
+                        .automatic_captions
+                        .clone()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|mut t| {
+                            t.is_auto = Some(true);
+                            t
+                        }),
+                )
+                .collect(),
             chapters: metadata.chapters.clone().unwrap_or_default(),
             thumbnails,
             formats: metadata.formats.clone().unwrap_or_default(),
@@ -157,6 +186,7 @@ mod tests {
             chapters: None,
             formats: Some(vec![
                 MediaFormatSpec {
+                    language: None,
                     format_id: "137".to_string(),
                     ext: "mp4".to_string(),
                     resolution: Some("1920x1080".to_string()),
@@ -176,6 +206,7 @@ mod tests {
                     audio_channels: None,
                 },
                 MediaFormatSpec {
+                    language: None,
                     format_id: "140".to_string(),
                     ext: "m4a".to_string(),
                     resolution: None,
@@ -207,7 +238,7 @@ mod tests {
         assert_eq!(graph.video_streams.len(), 1);
         assert_eq!(graph.audio_streams.len(), 1);
         assert_eq!(graph.video_streams[0].width, 1920);
-        assert_eq!(graph.video_streams[0].fps, 60.0);
+        assert_eq!(graph.video_streams[0].fps, Some(60.0));
         assert_eq!(graph.audio_streams[0].channels, Some(2));
         assert_eq!(graph.thumbnails.len(), 1);
     }

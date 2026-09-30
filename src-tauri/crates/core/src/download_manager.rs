@@ -5,15 +5,18 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::diagnostics::DiagnosticsBuffer;
+use crate::execution::compile_acquisition_args;
 use crate::media_verifier::{resolve_final_download_path, verify_and_inspect_media};
 use crate::path_validator::validate_and_ensure_directory;
-use crate::presets::compile_download_args;
+use crate::planner::AcquisitionPlanner;
 use crate::process_runner::ProcessHandle;
 use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
 use crate::settings::SettingsManager;
 use crate::state_machine::DownloadStateMachine;
 use crate::tools::ToolResolver;
-use crate::types::{DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest};
+use crate::types::{
+    AcquisitionOperation, DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest,
+};
 use crate::url_validator::validate_media_url_network;
 
 pub struct ActiveJobHandle {
@@ -72,28 +75,64 @@ impl DownloadManager {
             }
         }
 
+        // Bind admission to the plan the user reviewed, before filesystem or network work.
+        let source_graph = crate::media_graph::MediaGraph::build_source_graph(
+            &request.metadata,
+            request.metadata.source_type.unwrap_or_default(),
+        );
+        let current_settings = self.settings.get_settings();
+        let plan = AcquisitionPlanner::plan_with_policy(
+            &source_graph,
+            &request.acquisition,
+            (&current_settings).into(),
+        )?;
+        if plan.id != request.expected_plan_id {
+            return Err(
+                "Acquisition plan changed. Review the updated plan before downloading.".into(),
+            );
+        }
+        for tool in required_tools(&plan)? {
+            self.tool_resolver.resolve_tool_with_settings(tool, Some(&current_settings))
+                .await.ok_or_else(|| format!("Required tool {tool} is unavailable. Install or repair it before downloading."))?;
+        }
+
         // 2. Validate URL and Output Directory
-        let valid_url = validate_media_url_network(&request.url)
+        let valid_url = validate_media_url_network(&request.metadata.webpage_url)
             .await
             .map_err(|e| e.to_string())?;
-        let output_dir_path =
-            validate_and_ensure_directory(&request.output_directory).map_err(|e| e.to_string())?;
+        let mut output_dir_path =
+            validate_and_ensure_directory(&request.acquisition.output_directory)
+                .map_err(|e| e.to_string())?;
 
         // 3. Resolve yt-dlp tool
-        let current_settings = self.settings.get_settings();
         let ytdlp_tool = self
             .tool_resolver
             .resolve_tool_with_settings("yt-dlp", Some(&current_settings))
             .await
             .ok_or_else(|| "yt-dlp executable not found".to_string())?;
 
-        let compiled = compile_download_args(
-            request.preset,
-            &request.quality,
-            &output_dir_path.to_string_lossy(),
-            &valid_url,
-            &current_settings,
+        let mut acquisition = request.acquisition.clone();
+        acquisition.output_directory = output_dir_path.to_string_lossy().to_string();
+        let sidecar = matches!(
+            plan.operation,
+            AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
         );
+        {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos();
+            output_dir_path = output_dir_path.join(format!("{}-{unique}", plan.id));
+            std::fs::create_dir(&output_dir_path).map_err(|e| e.to_string())?;
+            acquisition.output_directory = output_dir_path.to_string_lossy().into_owned();
+        }
+        let compiled = compile_acquisition_args(
+            &plan,
+            &crate::execution::ExecutionContext::new(
+                &acquisition.output_directory,
+                &current_settings,
+            ),
+        )?;
 
         let job_id = format!("job-{}", Local::now().timestamp_millis());
         let now_str = Local::now().to_rfc3339();
@@ -101,8 +140,6 @@ impl DownloadManager {
         let initial_job = DownloadJob {
             id: job_id.clone(),
             url: valid_url.clone(),
-            preset: request.preset,
-            quality: request.quality.clone(),
             output_directory: output_dir_path.to_string_lossy().to_string(),
             status: DownloadStatus::Downloading,
             progress: DownloadProgress::default(),
@@ -111,11 +148,10 @@ impl DownloadManager {
             final_file_path: None,
             inspection: None,
             verification: None,
+            acquisition_plan: plan.clone(),
             error_message: None,
             created_at: now_str,
             completed_at: None,
-            subtitle_options: None,
-            sponsor_block_mode: Some(current_settings.sponsor_block_mode),
             intent: None,
             recipe: None,
             fingerprint: None,
@@ -126,8 +162,8 @@ impl DownloadManager {
             "INFO",
             "DOWNLOAD_MANAGER",
             &format!(
-                "Starting download for '{}' using preset {:?}",
-                request.metadata.title, request.preset
+                "Starting download for '{}' using acquisition plan {}",
+                request.metadata.title, plan.id
             ),
         );
 
@@ -246,7 +282,19 @@ impl DownloadManager {
                     }
 
                     // Resolve final file path
-                    let final_path = if let Some(dest) = captured_destination {
+                    let final_path = if sidecar {
+                        let filename =
+                            if matches!(plan.operation, AcquisitionOperation::ThumbnailOnly) {
+                                "artifact.jpg".to_string()
+                            } else {
+                                format!(
+                                    "artifact.{}.vtt",
+                                    plan.selected_streams.subtitle_languages[0]
+                                )
+                            };
+                        let path = output_dir_path.join(filename);
+                        path.is_file().then_some(path)
+                    } else if let Some(dest) = captured_destination {
                         let p = PathBuf::from(dest);
                         if p.exists() {
                             Some(p)
@@ -258,7 +306,55 @@ impl DownloadManager {
                     };
 
                     match final_path {
-                        Some(resolved_file) => {
+                        Some(mut resolved_file) => {
+                            if let Some(transform) = &compiled.finalize {
+                                if let Some(job) = active_job_clone.write().await.as_mut() {
+                                    job.status = DownloadStatus::PostProcessing;
+                                }
+                                let output = resolved_file.with_file_name(format!(
+                                    "{}.converted.{}",
+                                    resolved_file
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("media"),
+                                    transform.container
+                                ));
+                                let result = match tool_resolver_clone
+                                    .resolve_tool_with_settings(
+                                        "ffmpeg",
+                                        Some(&verification_settings),
+                                    )
+                                    .await
+                                {
+                                    Some(tool) => {
+                                        run_final_transform(
+                                            &tool.path,
+                                            &transform.arguments(&resolved_file, &output),
+                                            &mut cancel_rx,
+                                            &diagnostics_clone,
+                                        )
+                                        .await
+                                    }
+                                    None => Err("Required FFmpeg became unavailable".into()),
+                                };
+                                if let Err(error) = result {
+                                    if let Some(job) = active_job_clone.write().await.as_mut() {
+                                        job.status = if error == "Cancelled" {
+                                            DownloadStatus::Cancelled
+                                        } else {
+                                            DownloadStatus::Failed
+                                        };
+                                        job.error_message = Some(error);
+                                        job.completed_at = Some(Local::now().to_rfc3339());
+                                    }
+                                    *active_handle_clone.lock().await = None;
+                                    return;
+                                }
+                                resolved_file = output;
+                                if let Some(job) = active_job_clone.write().await.as_mut() {
+                                    job.status = DownloadStatus::Verifying;
+                                }
+                            }
                             diagnostics_clone.log(
                                 "INFO",
                                 "VERIFY",
@@ -275,12 +371,17 @@ impl DownloadManager {
                             let ffprobe_tool = tool_resolver_clone
                                 .resolve_tool_with_settings("ffprobe", Some(&verification_settings))
                                 .await;
-                            let inspection_result = verify_and_inspect_media(
-                                &resolved_file,
-                                ffprobe_tool.as_ref().map(|tool| tool.path.as_path()),
-                                is_lossy_warning,
-                            )
-                            .await;
+                            let inspection_result =
+                                if matches!(plan.operation, AcquisitionOperation::SubtitlesOnly) {
+                                    crate::media_verifier::verify_subtitle(&resolved_file).await
+                                } else {
+                                    verify_and_inspect_media(
+                                        &resolved_file,
+                                        ffprobe_tool.as_ref().map(|tool| tool.path.as_path()),
+                                        is_lossy_warning,
+                                    )
+                                    .await
+                                };
 
                             match inspection_result {
                                 Ok(inspection) => {
@@ -314,6 +415,9 @@ impl DownloadManager {
                                             job,
                                             job.verification.as_ref().map(|v| v.checklist.clone()),
                                         );
+                                        if let Some(explanation) = job.explainable_result.as_mut() {
+                                            explanation.recipe_id = Some(recipe.id.clone());
+                                        }
                                         job.recipe = Some(recipe);
 
                                         if job.verification.as_ref().is_some_and(|v| v.is_valid) {
@@ -415,76 +519,152 @@ impl DownloadManager {
     }
 }
 
+async fn run_final_transform(
+    ffmpeg: &std::path::Path,
+    args: &[String],
+    cancel_rx: &mut mpsc::Receiver<()>,
+    diagnostics: &DiagnosticsBuffer,
+) -> Result<(), String> {
+    if cancel_rx.try_recv().is_ok() {
+        return Err("Cancelled".into());
+    }
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut process = ProcessHandle::spawn_with_streaming(ffmpeg, args, tx).await?;
+    loop {
+        tokio::select! {
+            _ = cancel_rx.recv() => { process.kill_tree().await; return Err("Cancelled".into()); }
+            line = rx.recv() => match line {
+                Some(line) => diagnostics.log("DEBUG", "FFMPEG", &line),
+                None => break,
+            }
+        }
+    }
+    if process.wait_for_exit().await? {
+        Ok(())
+    } else {
+        Err("Planned FFmpeg transformation failed; source retained.".into())
+    }
+}
+
+fn required_tools(plan: &crate::types::AcquisitionPlan) -> Result<Vec<&'static str>, String> {
+    plan.requirements
+        .iter()
+        .map(|requirement| match requirement.code.as_str() {
+            "YT_DLP" => Ok("yt-dlp"),
+            "FFMPEG" => Ok("ffmpeg"),
+            "FFPROBE" => Ok("ffprobe"),
+            code => Err(format!("Unsupported plan requirement: {code}")),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::tool_manager::ToolManager;
-    use crate::types::{MediaKind, MediaMetadata, PresetType};
+    use crate::types::{
+        AcquisitionRequest, DuplicatePolicy, MediaFormatSpec, MediaKind, MediaMetadata,
+        OutputProfile, SourceScope, TrackSelection,
+    };
 
     fn test_job() -> DownloadJob {
+        let metadata = MediaMetadata {
+            id: "media".to_string(),
+            title: "Media".to_string(),
+            uploader: None,
+            uploader_avatar: None,
+            channel_id: None,
+            uploader_url: None,
+            duration: Some(1.0),
+            thumbnail: None,
+            webpage_url: "http://93.184.216.34/media".to_string(),
+            media_kind: MediaKind::Video,
+            upload_date: None,
+            release_timestamp: None,
+            view_count: None,
+            like_count: None,
+            description: None,
+            categories: None,
+            tags: None,
+            language: None,
+            is_live: Some(false),
+            was_live: Some(false),
+            extractor: None,
+            extractor_key: None,
+            playlist_title: None,
+            playlist_index: None,
+            playlist_count: None,
+            available_resolutions: vec![720],
+            available_frame_rates: vec![30],
+            has_video: true,
+            has_audio: true,
+            is_hdr: None,
+            subtitles: None,
+            automatic_captions: None,
+            chapters: None,
+            formats: Some(vec![MediaFormatSpec {
+                language: None,
+                format_id: "combined".to_string(),
+                ext: "mp4".to_string(),
+                resolution: Some("1280x720".to_string()),
+                width: Some(1280),
+                height: Some(720),
+                fps: Some(30.0),
+                vcodec: Some("avc1.64001f".to_string()),
+                acodec: Some("mp4a.40.2".to_string()),
+                filesize: Some(1_000_000),
+                filesize_approx: None,
+                tbr: Some(1000.0),
+                vbr: Some(900.0),
+                abr: Some(128.0),
+                hdr: Some(false),
+                dynamic_range: None,
+                audio_sample_rate: Some(48_000),
+                audio_channels: Some(2),
+            }]),
+            smart_recommendation: None,
+            source_type: None,
+            strategy: None,
+            transcoding_cost: None,
+            transcoding_explanation: None,
+            capabilities: None,
+        };
+        let acquisition = AcquisitionRequest {
+            source_scope: SourceScope::SingleMedia,
+            operation: AcquisitionOperation::EntireMedia,
+            output_profile: OutputProfile::Universal,
+            track_selection: TrackSelection::default(),
+            metadata_patch: None,
+            duplicate_policy: DuplicatePolicy::Rename,
+            output_directory: "/tmp".to_string(),
+            max_video_height: None,
+        };
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &metadata,
+            metadata.source_type.unwrap_or_default(),
+        );
+        let acquisition_plan = AcquisitionPlanner::plan(&graph, &acquisition).unwrap();
+
         DownloadJob {
             id: "job-cancel-test".to_string(),
             url: "https://example.com/media".to_string(),
-            preset: PresetType::Mp4Compatible,
-            quality: "auto".to_string(),
             output_directory: "/tmp".to_string(),
             status: DownloadStatus::Downloading,
             progress: DownloadProgress::default(),
-            metadata: MediaMetadata {
-                id: "media".to_string(),
-                title: "Media".to_string(),
-                uploader: None,
-                uploader_avatar: None,
-                channel_id: None,
-                uploader_url: None,
-                duration: Some(1.0),
-                thumbnail: None,
-                webpage_url: "https://example.com/media".to_string(),
-                media_kind: MediaKind::Video,
-                upload_date: None,
-                release_timestamp: None,
-                view_count: None,
-                like_count: None,
-                description: None,
-                categories: None,
-                tags: None,
-                language: None,
-                is_live: Some(false),
-                was_live: Some(false),
-                extractor: None,
-                extractor_key: None,
-                playlist_title: None,
-                playlist_index: None,
-                playlist_count: None,
-                available_resolutions: vec![],
-                available_frame_rates: vec![],
-                has_video: true,
-                has_audio: true,
-                is_hdr: None,
-                subtitles: None,
-                automatic_captions: None,
-                chapters: None,
-                formats: None,
-                smart_recommendation: None,
-                source_type: None,
-                strategy: None,
-                transcoding_cost: None,
-                transcoding_explanation: None,
-                capabilities: None,
-            },
+            metadata,
             final_file_name: None,
             final_file_path: None,
             inspection: None,
             error_message: None,
             created_at: "now".to_string(),
             completed_at: None,
-            subtitle_options: None,
-            sponsor_block_mode: None,
             intent: None,
             recipe: None,
             fingerprint: None,
             explainable_result: None,
             verification: None,
+            acquisition_plan,
         }
     }
 
@@ -532,14 +712,40 @@ mod tests {
             diagnostics,
             Arc::new(SettingsManager::new()),
         ));
-        let request = StartDownloadRequest {
-            url: "http://93.184.216.34/media".to_string(),
+        let mut request = StartDownloadRequest {
+            expected_plan_id: String::new(),
             metadata: test_job().metadata,
-            preset: PresetType::Mp4Compatible,
-            quality: "auto".to_string(),
-            output_directory: output_directory.path().to_string_lossy().to_string(),
+            acquisition: AcquisitionRequest {
+                source_scope: SourceScope::SingleMedia,
+                operation: AcquisitionOperation::EntireMedia,
+                output_profile: OutputProfile::Universal,
+                track_selection: TrackSelection::default(),
+                metadata_patch: None,
+                duplicate_policy: DuplicatePolicy::Rename,
+                output_directory: output_directory.path().to_string_lossy().to_string(),
+                max_video_height: None,
+            },
         };
 
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &request.metadata,
+            request.metadata.source_type.unwrap_or_default(),
+        );
+        request.expected_plan_id = AcquisitionPlanner::plan_with_policy(
+            &graph,
+            &request.acquisition,
+            (&manager.settings.get_settings()).into(),
+        )
+        .unwrap()
+        .id;
+        let mut stale_request = request.clone();
+        stale_request.expected_plan_id = "stale-plan".into();
+        assert!(manager
+            .start_download(stale_request)
+            .await
+            .unwrap_err()
+            .contains("plan changed"));
+        assert!(manager.get_active_job().await.is_none());
         let first_manager = manager.clone();
         let first_request = request.clone();
         let second_manager = manager.clone();

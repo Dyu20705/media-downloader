@@ -1,11 +1,15 @@
 use ocmd_core::analyzer::parse_ytdlp_json;
 use ocmd_core::diagnostics::DiagnosticsBuffer;
 use ocmd_core::path_validator::{sanitize_file_name, validate_and_ensure_directory};
-use ocmd_core::presets::compile_download_args;
 use ocmd_core::state_machine::DownloadStateMachine;
 use ocmd_core::tools::ToolResolver;
-use ocmd_core::types::{AppSettings, DownloadStatus, MediaKind, PresetType};
+use ocmd_core::types::{DownloadStatus, MediaKind};
 use ocmd_core::url_validator::validate_media_url;
+use ocmd_core::{
+    execution::{compile_acquisition_args, ExecutionContext},
+    media_graph::MediaGraph,
+    planner::AcquisitionPlanner,
+};
 use std::sync::Arc;
 
 fn has_arg_pair(arguments: &[String], flag: &str, value: &str) -> bool {
@@ -41,72 +45,28 @@ fn test_path_validation_and_sanitization() {
 }
 
 #[test]
-fn test_all_preset_compilation() {
-    let settings = AppSettings::default();
-
-    // 1. MP4 Compatible
-    let mp4 = compile_download_args(
-        PresetType::Mp4Compatible,
-        "1080",
-        "/downloads",
-        "https://example.com/watch?v=123",
-        &settings,
-    );
-    assert!(has_arg_pair(&mp4.arguments, "--merge-output-format", "mp4"));
-
-    // 2. Best Video
-    let best_vid = compile_download_args(
-        PresetType::BestVideo,
-        "auto",
-        "/downloads",
-        "https://example.com/watch?v=123",
-        &settings,
-    );
-    assert!(has_arg_pair(&best_vid.arguments, "-f", "bv+ba/b"));
-    assert!(has_arg_pair(
-        &best_vid.arguments,
-        "--merge-output-format",
-        "mkv"
-    ));
-
-    // 3. Best Audio
-    let best_aud = compile_download_args(
-        PresetType::BestAudio,
-        "auto",
-        "/downloads",
-        "https://example.com/watch?v=123",
-        &settings,
-    );
-    assert!(best_aud.is_audio_only);
-    assert!(best_aud.arguments.contains(&"-x".to_string()));
-    assert!(has_arg_pair(&best_aud.arguments, "-f", "bestaudio/b"));
-    assert!(!best_aud.arguments.contains(&"--audio-format".to_string()));
-    assert!(!best_aud.is_lossy_conversion);
-
-    // 4. MP3
-    let mp3 = compile_download_args(
-        PresetType::Mp3,
-        "auto",
-        "/downloads",
-        "https://example.com/watch?v=123",
-        &settings,
-    );
-    assert!(mp3.is_audio_only);
-    assert!(mp3.is_lossy_conversion);
-    assert!(has_arg_pair(&mp3.arguments, "--audio-format", "mp3"));
-    assert!(has_arg_pair(&mp3.arguments, "--audio-quality", "0"));
-
-    // 5. FLAC
-    let flac = compile_download_args(
-        PresetType::Flac,
-        "auto",
-        "/downloads",
-        "https://example.com/watch?v=123",
-        &settings,
-    );
-    assert!(flac.is_audio_only);
-    assert!(!flac.is_lossy_conversion);
-    assert!(has_arg_pair(&flac.arguments, "--audio-format", "flac"));
+fn test_acquisition_compilation() {
+    use ocmd_core::types::*;
+    let metadata = parse_ytdlp_json(r#"{"id":"test","title":"Test","formats":[{"format_id":"v","ext":"mp4","width":1280,"height":720,"vcodec":"h264","acodec":"aac"}]}"#, "https://example.com/video").unwrap();
+    let graph = MediaGraph::build_source_graph(&metadata, MediaSourceType::YtDlpExtractor);
+    let request = AcquisitionRequest {
+        source_scope: SourceScope::SingleMedia,
+        operation: AcquisitionOperation::EntireMedia,
+        output_profile: OutputProfile::Universal,
+        track_selection: TrackSelection::default(),
+        metadata_patch: None,
+        duplicate_policy: DuplicatePolicy::Rename,
+        output_directory: "/downloads".into(),
+        max_video_height: None,
+    };
+    let plan = AcquisitionPlanner::plan(&graph, &request).unwrap();
+    let compiled = compile_acquisition_args(
+        &plan,
+        &ExecutionContext::new("/downloads", &AppSettings::default()),
+    )
+    .unwrap();
+    assert!(has_arg_pair(&compiled.arguments, "-f", "v"));
+    assert!(compiled.finalize.is_none());
 }
 
 #[test]
