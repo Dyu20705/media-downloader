@@ -1,5 +1,9 @@
 # Packaging & Release Distribution — One-Click Media Downloader
 
+## 0. Release status and required evidence
+
+The repository is a development baseline, not a production or release candidate. The current branch has not produced or inspected a packaged desktop artifact. A release candidate still requires durable job/history storage and restart recovery, migration tests, install-and-launch smoke tests for each supported operating system, checksums for release artifacts, documented dependency/security review, signing/notarization policy, and beta validation. A successful frontend build or CI run alone does not satisfy those gates.
+
 ## 1. Distribution Strategy
 
 One-Click Media Downloader targets Windows 10/11 x64 as a standalone executable (`.exe`) and lightweight installer (`.exe` via NSIS).

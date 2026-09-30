@@ -1,10 +1,20 @@
 # Media Downloader — Current State
 
-> Snapshot: 2026-09-29
+> Snapshot: 2026-09-30
 >
-> Branch: `feat/canonical-acquisition-plan`
+> Branch: `feat/production-readiness` (based on `dev` at `d33e3c8b685491cf85444390683dad381e82028b`)
 >
 > Product target: [design-master.md](design-master.md)
+
+## Production-readiness increment (2026-09-30)
+
+This branch selectively ports the two reviewed post-merge commits from the former canonical-plan branch. It adds cross-platform core checks, Tauri host validation, frontend capability/configuration contracts, scheduled CodeQL and RustSec scans, Dependabot updates, and secret/workflow checks. Contract PR checks now target both `dev` and `main`.
+
+Diagnostics omit user-provided URLs at call sites and structurally normalize any URL found in text to its origin plus `/[REDACTED]`. URL userinfo, path, query and fragment are removed. Authorization, Cookie and X-Api-Key headers are redacted. The sanitizer tests cover those secret locations.
+
+The UI identifies playlist context. When a video URL also names a playlist, “This video” is the only available choice and is the default. Entire-playlist execution remains unavailable. yt-dlp acquisition continues to compile explicit `--no-playlist`.
+
+This increment does not add durable jobs, retry history, startup recovery, typed recovery errors, or packaged desktop smoke tests. Those remain release blockers; CI passing alone does not make this a production candidate.
 
 ## Implemented slice
 
@@ -90,12 +100,12 @@ Fast cuts are not frame-accurate. Multi-artifact subtitle jobs and split-all-cha
 
 ## Verification evidence
 
-Local Linux validation is separate from cross-platform CI. The results below describe the checked-in regression suite; GitHub Actions is authoritative for remote validation.
+Local Linux validation is separate from cross-platform CI. The local results below were rerun on 2026-09-30 for `feat/production-readiness`; GitHub Actions is authoritative for remote validation.
 
-- Core: 56 unit tests, 3 execution-contract tests, 7 integration tests, 11 merge-review regression tests, 9 tool-manager tests (86 total).
-- Desktop: 6 integration tests.
+- Core: 59 unit tests, 3 execution-contract tests, 7 integration tests, 11 merge-review regression tests, 9 tool-manager tests (89 total).
+- Desktop: 5 integration tests pass; 1 live-provider smoke test is ignored by default.
 - The offline SRT-only fixture runs real yt-dlp and FFmpeg and validates the final artifact.en.vtt file. Local yt-dlp: 2026.08.25.233329. CI installs the managed catalog version, 2025.02.19.
-- Frontend: 6 tests covering stale plans, settings invalidation, planning failure, backend-owned mismatch rendering and numeric millisecond IPC types.
+- Frontend: 11 tests covering stale plans, settings invalidation, planning failure, backend-owned mismatch rendering, numeric millisecond IPC types, and playlist intent detection.
 - Rust/TypeScript IPC DTOs are generated from Rust; a test fails if checked-in bindings drift, ignoring CRLF/LF differences. Regression coverage checks that type changes still fail comparison. Regenerate with `npm run bindings`.
 - TypeScript checking, production Vite build, Rust formatting, Clippy and desktop Cargo checks are run before handoff.
 - CI runs Rust tests/Clippy on Linux, Windows and macOS, plus frontend tests/build. A green matrix for the candidate commit is required before merge. See [GitHub Actions](https://github.com/Dyu20705/media-downloader/actions) for current results. Unix shell-executable fixtures are Unix-only; archive and artifact-selection tests are portable.

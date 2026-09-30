@@ -44,7 +44,7 @@ Frontend capabilities are scoped strictly to required operations:
 - Arbitrary filesystem read/write and wildcard shell plugins are **disabled**.
 
 ### 2.5 Safe Diagnostics & Log Redaction
-The in-memory ring buffer sanitizes all diagnostic log entries:
+The in-memory ring buffer sanitizes all diagnostic log entries before retention. URL values are normalized to `https://example.com/[REDACTED]`: userinfo, signed path components, query parameters, and fragments are removed. Authorization, Cookie, and X-Api-Key header values are redacted. URL-bearing inputs are not included in resolver/analyzer log messages.
 - Redacts authorization tokens (`Bearer [REDACTED]`, `Authorization: [REDACTED]`).
 - Redacts session cookies (`Cookie: [REDACTED]`).
 - Redacts API keys (`api_key=[REDACTED]`).
