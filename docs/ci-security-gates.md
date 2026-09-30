@@ -4,7 +4,7 @@ These gates establish a production-oriented engineering baseline and reduce spec
 
 ## Pull-request blocking checks
 
-`.github/workflows/contracts.yml` runs for pull requests targeting `main` and pushes to `main`, avoiding duplicate feature-branch push/PR runs. Repository permissions are read-only:
+`.github/workflows/contracts.yml` runs for pull requests targeting `dev` or `main`, and pushes to `main`, avoiding duplicate feature-branch push/PR runs. Repository permissions are read-only:
 
 | Check | Risk or regression it detects | Expected cost |
 | --- | --- | --- |
@@ -25,6 +25,8 @@ The npm install-script allowlist is intentionally narrow: only `esbuild@0.25.12`
 
 - CodeQL analyzes Rust and TypeScript and publishes code-scanning results. Findings require human triage; this is not a PR merge gate.
 - `cargo-audit` checks both committed Rust lockfiles against the changing RustSec advisory database. A finding makes the scheduled run fail but does not automatically block unrelated PRs.
+
+The contract workflow targets the active `dev` integration branch as well as `main`; feature-branch pushes do not trigger a duplicate copy of the full contract suite.
 
 The PR npm audit is deliberately limited to installed production dependencies and high/critical severity. It uses the live npm advisory database, so a fresh advisory can change the result without a source change. Lower-severity and development-only findings remain visible through dependency update/review work rather than making this deterministic gate noisy.
 

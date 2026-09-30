@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
   - **Output Profile** independently chooses how output should behave: Best Source, Universal, Editing, or Small.
   - The backend-generated plan shows exact selected streams, output shape, processing, requirements, and warnings before download.
 - **Plan Verification**: The backend compares inspected codecs, container, dimensions, FPS and duration against the reviewed plan; mismatches are shown in the receipt.
-- **Runtime checks**: Subprocess execution without shell interpolation, URL/DNS preflight and bounded diagnostics. See [security boundaries](CURRENT-STATE.md#state-and-boundaries).
+- **Runtime checks**: Subprocess execution without shell interpolation, URL/DNS preflight and bounded diagnostics. URL credentials and path/query/fragment values are removed from diagnostics. Playlist links default to one video; whole-playlist execution is not available yet. See [security boundaries](CURRENT-STATE.md#state-and-boundaries).
 
 ---
 
@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
 
 ```bash
 # Install dependencies
-npm install
+npm ci
 
 # Run in development mode
 npm run tauri dev
