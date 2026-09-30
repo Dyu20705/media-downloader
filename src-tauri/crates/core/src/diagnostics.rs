@@ -81,13 +81,14 @@ impl DiagnosticsBuffer {
 }
 
 pub fn sanitize_diagnostic_text(text: &str) -> String {
-    // Redact common auth tokens, passwords, cookies, signed URL tokens, private headers
+    // Redact common auth tokens, passwords, cookies, URL query strings, and private headers.
     let mut result = text.to_string();
 
     let sensitive_patterns = [
         ("(?i)bearer [a-zA-Z0-9_\\-\\.]+", "Bearer [REDACTED]"),
-        ("(?i)authorization: [^\\s]+", "Authorization: [REDACTED]"),
-        ("(?i)cookie: [^\\s]+", "Cookie: [REDACTED]"),
+        ("(?i)(authorization:\\s*)[^\\r\\n]+", "$1[REDACTED]"),
+        ("(?i)(cookie:\\s*)[^\\r\\n]+", "$1[REDACTED]"),
+        ("(?i)(x-api-key:\\s*)[^\\s,;]+", "$1[REDACTED]"),
         ("(?i)api_key=[^&\\s]+", "api_key=[REDACTED]"),
         ("(?i)apikey=[^&\\s]+", "apikey=[REDACTED]"),
         ("(?i)password=[^&\\s]+", "password=[REDACTED]"),
@@ -95,6 +96,8 @@ pub fn sanitize_diagnostic_text(text: &str) -> String {
         ("(?i)sig=[a-zA-Z0-9_\\-\\.]+", "sig=[REDACTED]"),
         ("(?i)signature=[a-zA-Z0-9_\\-\\.]+", "signature=[REDACTED]"),
         ("(?i)token=[a-zA-Z0-9_\\-\\.]+", "token=[REDACTED]"),
+        ("(?i)(https?://)[^/@\\s?#]+@", "$1[REDACTED]@"),
+        ("(?i)(https?://[^\\s?#]+)\\?[^\\s#]+", "$1?[REDACTED]"),
     ];
 
     for (pattern, replacement) in sensitive_patterns {
@@ -118,6 +121,28 @@ mod tests {
         assert!(!cleaned.contains("supersecret"));
         assert!(!cleaned.contains("abc1234xyz"));
         assert!(cleaned.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitization_redacts_entire_media_url_query() {
+        let dirty = "Provider error for https://user:password@media.example/video?X-Amz-Credential=account%2Fscope&custom_auth=secret-value&part=audio";
+        let cleaned = sanitize_diagnostic_text(dirty);
+
+        assert!(cleaned.contains("https://[REDACTED]@media.example/video?[REDACTED]"));
+        assert!(!cleaned.contains("user:password"));
+        assert!(!cleaned.contains("account%2Fscope"));
+        assert!(!cleaned.contains("secret-value"));
+        assert!(!cleaned.contains("part=audio"));
+    }
+
+    #[test]
+    fn test_sanitization_redacts_complete_auth_headers() {
+        let dirty = "Authorization: Bearer secret-token\nCookie: session=secret-cookie\nX-Api-Key: secret-api-key";
+        let cleaned = sanitize_diagnostic_text(dirty);
+
+        assert!(!cleaned.contains("secret-token"));
+        assert!(!cleaned.contains("secret-cookie"));
+        assert!(!cleaned.contains("secret-api-key"));
     }
 
     #[test]
