@@ -561,6 +561,7 @@ fn required_tools(plan: &crate::types::AcquisitionPlan) -> Result<Vec<&'static s
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::tool_manager::ToolManager;
     use crate::types::{
         AcquisitionRequest, DuplicatePolicy, MediaFormatSpec, MediaKind, MediaMetadata,

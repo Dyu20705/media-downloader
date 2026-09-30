@@ -77,8 +77,9 @@ impl ProcessHandle {
             #[cfg(windows)]
             {
                 // Kill process tree on Windows using taskkill /F /T /PID
+                let pid = pid.to_string();
                 let _ = std::process::Command::new("taskkill")
-                    .args(&["/F", "/T", "/PID", &pid.to_string()])
+                    .args(["/F", "/T", "/PID", &pid])
                     .output();
             }
 
