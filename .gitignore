@@ -31,6 +31,7 @@ temp_downloads/
 *.wav
 *.mkv
 *.ts
+!vite.config.ts
 !src/**/*.ts
 
 # Bundles and release packages
