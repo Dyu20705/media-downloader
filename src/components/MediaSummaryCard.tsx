@@ -9,9 +9,7 @@ import {
   Bookmark, 
   Music, 
   Globe, 
-  Sparkles,
   Smartphone,
-  User
 } from 'lucide-react';
 import { MediaMetadata } from '../types';
 

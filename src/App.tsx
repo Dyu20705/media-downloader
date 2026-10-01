@@ -30,13 +30,10 @@ import { AcquisitionRequest, DownloadJob } from './types';
 import { ipc } from './services/ipc';
 
 export const App: React.FC = () => {
-  // 1. Modals state manager
   const modals = useModals();
 
-  // 2. Diagnostics state manager
   const { logs, fetchDiagnostics, clearDiagnostics } = useDiagnostics();
 
-  // 3. Application Settings manager
   const {
     settings,
     outputDirectory,
@@ -51,7 +48,6 @@ export const App: React.FC = () => {
     saveSettings,
   } = useAppSettings();
 
-  // 4. Media Tools & Auto-Bootstrap Engine
   const {
     tools,
     toolStatuses,
@@ -63,7 +59,6 @@ export const App: React.FC = () => {
     installAllTools,
   } = useToolEngine();
 
-  // 5. Media URL & Metadata Analysis Engine
   const {
     url,
     setUrl,
@@ -75,7 +70,6 @@ export const App: React.FC = () => {
     handleAnalyze,
   } = useMediaAnalysis();
 
-  // 6. Dynamic Recommendation Engine
   const {
     currentRecommendation,
     isRecommendationApplied,
@@ -91,7 +85,6 @@ export const App: React.FC = () => {
     setQuality,
   });
 
-  // 7. Active Download & Queue Lifecycle Engine
   const {
     activeJob,
     allJobs,
@@ -280,7 +273,6 @@ export const App: React.FC = () => {
             onSelectQuality={setQuality}
             outputDirectory={outputDirectory}
             onChangeOutputDirectory={setOutputDirectory}
-            availableResolutions={metadata?.availableResolutions || []}
             disabled={isJobRunning}
           />
         </section>
@@ -307,7 +299,6 @@ export const App: React.FC = () => {
 
           <DownloadProgressState
             isAnalyzing={isAnalyzing}
-            hasUrl={Boolean(url)}
             hasMetadata={Boolean(metadata)}
             activeJob={activeJob}
             onStartDownload={handleStartDownload}

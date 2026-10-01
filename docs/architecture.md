@@ -19,7 +19,7 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 │             │                                 │             │
 │ ┌───────────▼───────────┐         ┌───────────▼───────────┐ │
 │ │ ProcessTree Runner    │         │ DiagnosticsBuffer     │ │
-│ │ (Job Object / SIGKILL)│         │ (256-line, <=64KiB)   │ │
+│ │ (taskkill / SIGKILL) │         │ (256-line, <=64KiB)   │ │
 │ └───────────┬───────────┘         └───────────────────────┘ │
 └─────────────┼───────────────────────────────────────────────┘
               │ Typed process invocation
@@ -58,13 +58,13 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 
 ---
 
-## 3. Strict Concurrency & Memory Guarantees
+## 3. Concurrency and retained-data bounds
 
-1. **Max Concurrency = 1**: The application strictly enforces a single concurrent active download job to prevent disk thrashing and bandwidth contention.
-2. **Bounded Polling**: React polls the active job every 400 ms while work is active; Rust coalesces process progress updates to at most 4 Hz.
-3. **Bounded Telemetry**: Progress events are throttled to a maximum frequency of 4 Hz (250 ms), maintaining 60 FPS UI responsiveness.
-4. **No Media Bytes in Memory**: Stream media writes directly to disk; never buffers raw video/audio chunks in React or Rust memory buffers.
+1. One active download job is admitted at a time; additional requests use a durable FIFO queue.
+2. React polls the active job every 400 ms while work is active; progress state updates are coalesced to at most 4 Hz.
+3. The diagnostics buffer retains at most 256 entries and 64 KiB of accounted text. Process output uses a bounded queue and drops oversized or excess diagnostic lines.
+4. Media transfer and encoding are delegated to child tools. This is not a bound on those tools' internal memory use.
 
 ## Durable state
 
-The Tauri host owns a SQLite `JobStore` opened from the per-user local application-data directory. Rust core receives the store through the download manager; React reads history through typed Tauri IPC. On startup, any nonterminal persisted job becomes `INTERRUPTED`, and no download is automatically resumed. Retries are explicit, use a new job ID, and recompute the plan under current settings. URL credentials, fragments, and unapproved query values are removed before serialization.
+The Tauri host opens a SQLite `JobStore` in the per-user local application-data directory. If the database cannot open or interrupted-job recovery fails, diagnostics report the error and the app falls back to session-only in-memory history; it does not remove the existing database. On successful startup, nonterminal persisted jobs become `INTERRUPTED`; no download is resumed automatically. Retries are explicit, use a new job ID, and recompute the plan under current settings. URL credentials, fragments, and unapproved query values are removed before serialization.

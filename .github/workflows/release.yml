@@ -2,46 +2,70 @@ name: Signed desktop release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type verify to build signed packages from main without publishing a release'
+        required: true
+        type: choice
+        options: [verify]
+        default: verify
 permissions:
   contents: read
 concurrency:
-  group: signed-release-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Require matching version tag from dev
+      - name: Require main ancestry and consistent version sources
         run: |
           set -eu
-          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          test "$GITHUB_REF_NAME" = "v$version"
-          git fetch origin dev
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/dev
-          grep -Fq "## $version" CHANGELOG.md
+          git fetch origin main
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF_NAME" != main ]; then echo 'Verification builds must be dispatched from main.' >&2; exit 1; fi
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          python3 - <<'PY'
+          import json, os, re, tomllib
+          from pathlib import Path
+          package_version = json.loads(Path('package.json').read_text())['version']
+          tauri_version = json.loads(Path('src-tauri/tauri.conf.json').read_text())['version']
+          host = tomllib.loads(Path('src-tauri/Cargo.toml').read_text())['package']['version']
+          core = tomllib.loads(Path('src-tauri/crates/core/Cargo.toml').read_text())['package']['version']
+          versions = [package_version, tauri_version, host, core]
+          if len(set(versions)) != 1 or not re.fullmatch(r'\d+\.\d+\.\d+', package_version): raise SystemExit(f'Version sources diverge or are not SemVer: {versions}')
+          if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ['GITHUB_REF_NAME'] != f'v{package_version}': raise SystemExit('Release tag must exactly match the package SemVer.')
+          if f'## {package_version}' not in Path('CHANGELOG.md').read_text(): raise SystemExit('Current version is missing from CHANGELOG.md')
+          PY
   package:
     needs: validate
-    runs-on: ${{ matrix.os }}
+    environment: production-release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             bundle: deb
-            artifact: linux-deb
-          - os: windows-latest
+            platform: linux-x86_64
+          - os: windows-2025
             bundle: nsis
-            artifact: windows-nsis
-          - os: macos-latest
+            platform: windows-x86_64
+          - os: macos-15-intel
             bundle: dmg
-            artifact: macos-dmg
+            platform: macos-x86_64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Install Linux prerequisites
         if: runner.os == 'Linux'
@@ -54,7 +78,7 @@ jobs:
         with:
           toolchain: 1.96.0
       - run: npm ci --no-audit --fund=false
-      - name: Require/import Windows signing certificate
+      - name: Require and import Windows signing certificate
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -97,61 +121,91 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
           rm -f "$certificate"
           echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
-      - name: Build signed platform bundle
+      - name: Build signed native package
         env:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run tauri -- build --bundles ${{ matrix.bundle }}
-      - name: Create bundle checksums
+      - name: Select expected package and create uniquely named artifact
         shell: bash
         run: |
           set -eu
-          mkdir -p release-artifacts
+          mkdir release-artifacts
           case "${{ matrix.bundle }}" in
-            deb) cp -- src-tauri/target/release/bundle/deb/*.deb release-artifacts/ ;;
-            nsis) cp -- src-tauri/target/release/bundle/nsis/*-setup.exe release-artifacts/ ;;
-            dmg) cp -- src-tauri/target/release/bundle/dmg/*.dmg release-artifacts/ ;;
+            deb) shopt -s nullglob; files=(src-tauri/target/release/bundle/deb/*.deb) ;;
+            nsis) shopt -s nullglob; files=(src-tauri/target/release/bundle/nsis/*-setup.exe) ;;
+            dmg) shopt -s nullglob; files=(src-tauri/target/release/bundle/dmg/*.dmg) ;;
           esac
-          cd release-artifacts
-          sha256sum -- ./* > SHA256SUMS
+          test "${#files[@]}" -eq 1
+          cp -- "${files[0]}" "release-artifacts/${{ matrix.platform }}__$(basename "${files[0]}")"
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: release-artifacts/*
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: ${{ matrix.artifact }}
-          path: release-artifacts/
+          name: ${{ matrix.platform }}
+          path: release-artifacts/*
           if-no-files-found: error
           retention-days: 7
-  publish:
+  verify-and-sign-manifest:
     needs: package
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    runs-on: ubuntu-24.04
     environment: production-release
+    permissions:
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
         with:
-          path: release-assets
+          path: release-assets/platforms
           merge-multiple: true
-      - name: Require GPG key, sign manifest, and verify bundles
+      - name: Require and verify signed combined checksum manifest
         env:
           RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         run: |
           set -eu
-          test -n "$RELEASE_GPG_PRIVATE_KEY" -a -n "$RELEASE_GPG_PASSPHRASE" || { echo 'Production publishing requires RELEASE_GPG_PRIVATE_KEY and RELEASE_GPG_PASSPHRASE.' >&2; exit 1; }
-          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*-setup.exe' -print -quit)"
-          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
-          cd release-assets
-          sha256sum -- ./*.deb ./*-setup.exe ./*.dmg > SHA256SUMS
+          test -n "$RELEASE_GPG_PRIVATE_KEY" -a -n "$RELEASE_GPG_PASSPHRASE" || { echo 'Signing verification requires RELEASE_GPG_PRIVATE_KEY and RELEASE_GPG_PASSPHRASE.' >&2; exit 1; }
+          test "$(find release-assets/platforms -type f | wc -l)" -eq 3
+          mkdir -p release-assets/final
+          (cd release-assets/platforms && find . -type f -printf '%P\0' | sort -z | xargs -0 sha256sum) > release-assets/final/SHA256SUMS
           printf '%s' "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
-          printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --detach-sign --armor SHA256SUMS
-          gpg --verify SHA256SUMS.asc SHA256SUMS
-      - name: Publish versioned release
+          gpg --batch --armor --export > release-assets/final/RELEASE-GPG-PUBLIC-KEY.asc
+          printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --detach-sign --armor release-assets/final/SHA256SUMS
+          gpg --verify release-assets/final/SHA256SUMS.asc release-assets/final/SHA256SUMS
+          (cd release-assets/platforms && sha256sum --check ../final/SHA256SUMS)
+      - name: Upload signed artifacts for workflow-run smoke testing
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: signed-production-artifacts-${{ github.sha }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: verify-and-sign-manifest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: signed-production-artifacts-${{ github.sha }}
+          path: release-assets
+      - name: Create version-specific release notes
+        run: node scripts/release/extract-notes.mjs
+      - name: Publish stable release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --title "openDownloader $GITHUB_REF_NAME" --notes-file CHANGELOG.md
+        run: gh release create "$GITHUB_REF_NAME" release-assets/platforms/* release-assets/final/* --verify-tag --title "openDownloader $GITHUB_REF_NAME" --notes-file release-notes.md

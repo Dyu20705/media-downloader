@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Sparkles, Zap, ShieldAlert, Cpu } from 'lucide-react';
+import { CheckCircle2, Sparkles, Zap } from 'lucide-react';
 import { FormatRecommendation, TranscodingCost } from '../types';
 
 interface RecommendationCardProps {

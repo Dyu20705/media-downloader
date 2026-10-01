@@ -64,12 +64,12 @@ pub fn artifact_for(
 pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
     PinnedToolSpec {
         name: "yt-dlp",
-        pinned_version: "2025.02.19",
+        pinned_version: "2026.08.19",
         executable_names: if cfg!(windows) { &["yt-dlp.exe", "yt-dlp"] } else { &["yt-dlp"] },
         artifacts: &[
-            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp.exe", sha256: "785f73d2a71d7992984ea7c3ea4e1837895e7c8ecba0aa2286e1aafe9d424b91", packaging: Packaging::Raw, executable_path: "yt-dlp.exe" },
-            ToolArtifact { os: "linux", arch: "universal", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp", sha256: "57ca88402db3b72c91838f5fbc7d9f7ad9cbb7a1df58ff7fe2ee398dbd71d3eb", packaging: Packaging::Raw, executable_path: "yt-dlp" },
-            ToolArtifact { os: "macos", arch: "universal", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.02.19/yt-dlp_macos", sha256: "d347ffc93839be9b4f2c0df82811a2164746fce529683679c6d39ad85ffccfce", packaging: Packaging::Raw, executable_path: "yt-dlp" },
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe", sha256: "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a", packaging: Packaging::Raw, executable_path: "yt-dlp.exe" },
+            ToolArtifact { os: "linux", arch: "x86_64", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_linux", sha256: "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a", packaging: Packaging::Raw, executable_path: "yt-dlp" },
+            ToolArtifact { os: "macos", arch: "universal", url: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_macos", sha256: "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202", packaging: Packaging::Raw, executable_path: "yt-dlp" },
         ],
         license: "Unlicense",
         license_url: "https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE",
@@ -78,28 +78,28 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
     },
     PinnedToolSpec {
         name: "ffmpeg",
-        pinned_version: "7.1",
+        pinned_version: "9.0.2",
         executable_names: if cfg!(windows) { &["ffmpeg.exe", "ffmpeg"] } else { &["ffmpeg"] },
         artifacts: &[
-            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip", sha256: "a937a00f2771d9d150ae1ae6e61f22eec74b41fb386eaebdfd5ffcfcfbc99d99", packaging: Packaging::Zip, executable_path: "bin/ffmpeg.exe" },
-            ToolArtifact { os: "linux", arch: "x86_64", url: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", sha256: "e06fa99e2e604f32386e594d80509a25cefcfe02c11eeeb2d9ee18e244b749ad", packaging: Packaging::TarXz, executable_path: "ffmpeg" },
-            ToolArtifact { os: "macos", arch: "x86_64", url: "https://evermeet.cx/ffmpeg/ffmpeg-7.1.7z", sha256: "c18a00351283c74ee5d14e1f7a1496a71eec8b74dfa98075fbc074558298711e", packaging: Packaging::SevenZip, executable_path: "ffmpeg" },
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-28-13-06/ffmpeg-n9.0.2-14-gebafaee10a-win64-gpl-9.0.zip", sha256: "09170e52cb657f184ba4da2f42567cf2841b661cd9bb5f46ffe4481eb8e6d841", packaging: Packaging::Zip, executable_path: "bin/ffmpeg.exe" },
+            ToolArtifact { os: "linux", arch: "x86_64", url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-28-13-06/ffmpeg-n9.0.2-14-gebafaee10a-linux64-gpl-9.0.tar.xz", sha256: "58e27dab85141ff1e08f43488b7700cc4443e17571bbee809edd6486d9dfd9b2", packaging: Packaging::TarXz, executable_path: "ffmpeg" },
+            ToolArtifact { os: "macos", arch: "x86_64", url: "https://evermeet.cx/ffmpeg/ffmpeg-9.0.2.zip", sha256: "4acc0be580f9b2788029eb7bd4d645ff87968911b0a62aeeb3940d42d54558d5", packaging: Packaging::Zip, executable_path: "ffmpeg" },
         ],
-        license: "GPL-3.0 / LGPL-2.1+",
+        license: "GPL-3.0",
         license_url: "https://ffmpeg.org/legal.html",
         is_required: true,
         description: "Audio/video muxing, encoding, and post-processing engine",
     },
     PinnedToolSpec {
         name: "ffprobe",
-        pinned_version: "7.1",
+        pinned_version: "9.0.2",
         executable_names: if cfg!(windows) { &["ffprobe.exe", "ffprobe"] } else { &["ffprobe"] },
         artifacts: &[
-            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip", sha256: "a937a00f2771d9d150ae1ae6e61f22eec74b41fb386eaebdfd5ffcfcfbc99d99", packaging: Packaging::Zip, executable_path: "bin/ffprobe.exe" },
-            ToolArtifact { os: "linux", arch: "x86_64", url: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz", sha256: "e06fa99e2e604f32386e594d80509a25cefcfe02c11eeeb2d9ee18e244b749ad", packaging: Packaging::TarXz, executable_path: "ffprobe" },
-            ToolArtifact { os: "macos", arch: "x86_64", url: "https://evermeet.cx/ffmpeg/ffprobe-7.1.7z", sha256: "d19b33a595a882a9341496a7a937a00f2771d9d150ae1ae6e61f22eec74b41fb", packaging: Packaging::SevenZip, executable_path: "ffprobe" },
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-28-13-06/ffmpeg-n9.0.2-14-gebafaee10a-win64-gpl-9.0.zip", sha256: "09170e52cb657f184ba4da2f42567cf2841b661cd9bb5f46ffe4481eb8e6d841", packaging: Packaging::Zip, executable_path: "bin/ffprobe.exe" },
+            ToolArtifact { os: "linux", arch: "x86_64", url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-28-13-06/ffmpeg-n9.0.2-14-gebafaee10a-linux64-gpl-9.0.tar.xz", sha256: "58e27dab85141ff1e08f43488b7700cc4443e17571bbee809edd6486d9dfd9b2", packaging: Packaging::TarXz, executable_path: "ffprobe" },
+            ToolArtifact { os: "macos", arch: "x86_64", url: "https://evermeet.cx/ffmpeg/ffprobe-9.0.2.zip", sha256: "24a9c968cd4da72d99c7245e914b921815835eb6dff01d99868031aebaf1d439", packaging: Packaging::Zip, executable_path: "ffprobe" },
         ],
-        license: "GPL-3.0 / LGPL-2.1+",
+        license: "GPL-3.0",
         license_url: "https://ffmpeg.org/legal.html",
         is_required: true,
         description: "Media stream analyzer and container inspector",
@@ -1022,7 +1022,6 @@ impl ToolManager {
         let spec = get_pinned_tool_spec(tool_name)
             .ok_or_else(|| format!("Unknown tool specification: {}", tool_name))?;
 
-        // 1. Verify Checksum
         self.diagnostics.log(
             "info",
             "tool_manager",
@@ -1037,7 +1036,6 @@ impl ToolManager {
             ));
         }
 
-        // 2. Prepare Version Target Directory
         let target_version_dir = self.get_version_dir(tool_name, spec.pinned_version);
         let staging_extract_dir = self.get_staging_dir().join(format!(
             "{}-extracted-{}",
@@ -1074,7 +1072,6 @@ impl ToolManager {
             }
         }
 
-        // 3. Executable Validation Check
         self.diagnostics.log(
             "info",
             "tool_manager",
@@ -1091,7 +1088,6 @@ impl ToolManager {
             }
         };
 
-        // 4. Move to version directory atomically
         fs::create_dir_all(&target_version_dir)
             .map_err(|e| format!("Failed to create target version dir: {}", e))?;
 
@@ -1126,7 +1122,6 @@ impl ToolManager {
 
         let _ = fs::remove_dir_all(&staging_extract_dir);
 
-        // 5. Atomically update manifest.json
         let mut manifest = self.load_manifest();
         let bin_sha = Self::compute_sha256(&final_destination)?;
 
@@ -1238,10 +1233,10 @@ mod version_tests {
 
     #[test]
     fn date_versions_are_compared_to_the_pin() {
-        assert!(is_date_version_older("2024.12.31", "2025.02.19"));
-        assert!(!is_date_version_older("2025.02.19", "2025.02.19"));
-        assert!(!is_date_version_older("stable 2026.01.02", "2025.02.19"));
-        assert!(!is_date_version_older("unknown", "2025.02.19"));
+        assert!(is_date_version_older("2025.12.31", "2026.08.19"));
+        assert!(!is_date_version_older("2026.08.19", "2026.08.19"));
+        assert!(!is_date_version_older("stable 2026.09.02", "2026.08.19"));
+        assert!(!is_date_version_older("unknown", "2026.08.19"));
     }
 }
 
@@ -1393,10 +1388,11 @@ mod archive_tests {
         );
         assert_eq!(
             artifact_for(ffmpeg, "macos", "x86_64").unwrap().packaging,
-            Packaging::SevenZip
+            Packaging::Zip
         );
         assert!(artifact_for(ffmpeg, "linux", "aarch64").is_err());
         assert!(artifact_for(ffmpeg, "macos", "aarch64").is_err());
+        assert!(artifact_for(get_pinned_tool_spec("yt-dlp").unwrap(), "linux", "aarch64").is_err());
         assert!(artifact_for(ffmpeg, "freebsd", "x86_64").is_err());
         assert!(artifact_for(
             get_pinned_tool_spec("mediainfo").unwrap(),

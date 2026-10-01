@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Minimal restricted capabilities for One-Click Media Downloader frontend","local":true,"windows":["*"],"permissions":["core:default","opener:default","dialog:default"]}}
+{"default":{"identifier":"default","description":"Minimal restricted capabilities for One-Click Media Downloader frontend","local":true,"windows":["*"],"permissions":["core:default","dialog:allow-open"]}}

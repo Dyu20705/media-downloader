@@ -11,7 +11,7 @@ use crate::media_verifier::{resolve_final_download_path, verify_and_inspect_medi
 use crate::path_validator::validate_and_ensure_directory;
 use crate::persistence::JobStore;
 use crate::planner::AcquisitionPlanner;
-use crate::process_runner::ProcessHandle;
+use crate::process_runner::{ProcessHandle, OUTPUT_CHANNEL_CAPACITY};
 use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
 use crate::settings::SettingsManager;
 use crate::state_machine::DownloadStateMachine;
@@ -192,7 +192,6 @@ impl DownloadManager {
                 .await.ok_or_else(|| format!("Required tool {tool} is unavailable. Install or repair it before downloading."))?;
         }
 
-        // 2. Validate URL and Output Directory
         let valid_url = validate_media_url_network(&request.metadata.webpage_url)
             .await
             .map_err(|e| e.to_string())?;
@@ -200,7 +199,6 @@ impl DownloadManager {
             validate_and_ensure_directory(&request.acquisition.output_directory)
                 .map_err(|e| e.to_string())?;
 
-        // 3. Resolve yt-dlp tool
         let ytdlp_tool = self
             .tool_resolver
             .resolve_tool_with_settings("yt-dlp", Some(&current_settings))
@@ -270,7 +268,7 @@ impl DownloadManager {
             ),
         );
 
-        let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+        let (line_tx, mut line_rx) = mpsc::channel::<String>(OUTPUT_CHANNEL_CAPACITY);
         let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
 
         let mut final_args = compiled.arguments.clone();
@@ -502,7 +500,6 @@ impl DownloadManager {
                                         job.progress.percentage = 100.0;
                                         job.completed_at = Some(Local::now().to_rfc3339());
 
-                                        // 1. Generate Media Fingerprint
                                         let fp = crate::fingerprint::FingerprintEngine::generate(
                                             &job.metadata,
                                             Some(&inspection),
@@ -510,7 +507,6 @@ impl DownloadManager {
                                         );
                                         job.fingerprint = Some(fp);
 
-                                        // 2. Generate Verification & Explainable Result
                                         let (verif, expl) = crate::media_verifier::generate_verification_and_explanation(
                                             job,
                                             &inspection,
@@ -519,7 +515,6 @@ impl DownloadManager {
                                         job.verification = Some(verif);
                                         job.explainable_result = Some(expl);
 
-                                        // 3. Create Reproducible Download Recipe
                                         let recipe = crate::recipe::RecipeEngine::create_recipe(
                                             job,
                                             job.verification.as_ref().map(|v| v.checklist.clone()),
@@ -703,7 +698,7 @@ async fn run_final_transform(
     if cancel_rx.try_recv().is_ok() {
         return Err("Cancelled".into());
     }
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
     let mut process = ProcessHandle::spawn_with_streaming(ffmpeg, args, tx).await?;
     loop {
         tokio::select! {
@@ -914,7 +909,7 @@ mod tests {
             Some(tools_directory.path().to_path_buf()),
             diagnostics.clone(),
         );
-        let fake_ytdlp = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2025.02.19; exit 0; fi\nsleep 0.1\nexit 1\n";
+        let fake_ytdlp = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2026.08.19; exit 0; fi\nsleep 0.1\nexit 1\n";
         let source = tools_directory.path().join("source");
         std::fs::write(&source, fake_ytdlp).unwrap();
         let hash = ToolManager::compute_sha256(&source).unwrap();

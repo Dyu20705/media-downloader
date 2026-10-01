@@ -1,14 +1,10 @@
 import React from 'react';
 import { 
-  CheckCircle2, 
   XCircle, 
   Loader2, 
-  FolderOpen, 
-  Play, 
   Ban, 
   RotateCcw,
   Info,
-  ShieldCheck
 } from 'lucide-react';
 import { DownloadJob } from '../types';
 import { ipc } from '../services/ipc';
@@ -16,7 +12,6 @@ import { AcquisitionReceipt } from './AcquisitionReceipt';
 
 interface DownloadProgressStateProps {
   isAnalyzing: boolean;
-  hasUrl: boolean;
   hasMetadata: boolean;
   activeJob: DownloadJob | null;
   onStartDownload: () => void;
@@ -29,7 +24,6 @@ interface DownloadProgressStateProps {
 
 export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
   isAnalyzing,
-  hasUrl,
   hasMetadata,
   activeJob,
   onStartDownload,
@@ -51,7 +45,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     }
   };
 
-  // 1. If currently analyzing
   if (isAnalyzing) {
     return (
       <div 
@@ -67,11 +60,9 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     );
   }
 
-  // 2. If active job exists
   if (activeJob) {
-    const { status, progress, finalFileName } = activeJob;
+    const { status, progress } = activeJob;
 
-    // COMPLETED
     if (status === 'COMPLETED') {
       return (
         <div className="space-y-4">
@@ -105,7 +96,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
       );
     }
 
-    // FAILED
     if (status === 'FAILED') {
       return (
         <div 
@@ -245,7 +235,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     );
   }
 
-  // 3. If ready to download (metadata parsed)
   if (hasMetadata) {
     return (
       <div className="space-y-3">
@@ -265,7 +254,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     );
   }
 
-  // 4. Initial EMPTY State
   return (
     <div className="py-6 text-center text-xs text-zinc-400" role="status">
       Paste a media URL to get started

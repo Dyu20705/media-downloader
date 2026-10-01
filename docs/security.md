@@ -28,10 +28,10 @@ Defined in `src-tauri/tauri.conf.json`:
 ```text
 default-src 'self';
 script-src 'self';
-style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-font-src 'self' data: https://fonts.gstatic.com;
+style-src 'self' 'unsafe-inline';
+font-src 'self' data:;
 img-src 'self' data: https: blob:;
-connect-src 'self' ipc: http://localhost:3000 https://github.com https://*.githubusercontent.com;
+connect-src 'self' ipc: http://localhost:3000;
 frame-src 'none';
 object-src 'none';
 ```
@@ -39,8 +39,7 @@ object-src 'none';
 ### 2.4 Minimal Tauri Capabilities
 Frontend capabilities are scoped strictly to required operations:
 - `core:default`: Standard Tauri IPC invocation.
-- `opener:default`: Explicit URL opening in default system browser.
-- `dialog:allow-open`: Folder selection dialog.
+- `dialog:allow-open`: Frontend folder selection dialog. No opener plugin permission is granted.
 - Arbitrary filesystem read/write and wildcard shell plugins are **disabled**.
 
 ### 2.5 Safe Diagnostics & Log Redaction

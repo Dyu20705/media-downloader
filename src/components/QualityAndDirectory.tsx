@@ -9,7 +9,6 @@ interface QualityAndDirectoryProps {
   onSelectQuality: (quality: string) => void;
   outputDirectory: string;
   onChangeOutputDirectory: (dir: string) => void;
-  availableResolutions: number[];
   disabled?: boolean;
 }
 
@@ -19,7 +18,6 @@ export const QualityAndDirectory: React.FC<QualityAndDirectoryProps> = ({
   onSelectQuality,
   outputDirectory,
   onChangeOutputDirectory,
-  availableResolutions,
   disabled = false
 }) => {
   const isAudioOperation = operation.type === 'AUDIO_ONLY';

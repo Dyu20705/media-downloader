@@ -9,7 +9,7 @@ These gates establish a production-oriented engineering baseline and reduce spec
 | Check | Risk or regression it detects | Expected cost |
 | --- | --- | --- |
 | Rust format, tests, and Clippy on Ubuntu, Windows, and macOS | Rust syntax/style drift, test regressions, and OS-specific compilation/lint failures in the core | 8–15 minutes per OS; runs in parallel |
-| Frontend TypeScript, tests, production build, and `npm audit --omit=dev --audit-level=high` | UI/type regressions, build breakage, and high/critical advisories affecting shipped npm dependencies; moderate advisories do not block | 3–7 minutes |
+| Frontend typecheck, ESLint, tests, production build, and `npm audit --omit=dev --audit-level=high` | UI/type regressions, lint findings, build breakage, and high/critical advisories affecting shipped npm dependencies; moderate advisories do not block | 3–7 minutes |
 | `npm run check:ci` | Common frontend process/shell imports, direct fetch/XHR/WebSocket APIs, or raw-HTML sinks; Tauri/Vite port mismatch; missing Tailwind Vite integration; weakened script/frame/object CSP; broadened shell/filesystem capability | Usually under 1 minute |
 | Tauri host `cargo check`, strict Clippy, and offline-capable integration tests on Ubuntu | Native host/plugin/config compilation, lint, and host-boundary regressions not exercised by core-only tests | 8–18 minutes, subject to Rust cache |
 | `actionlint` and offline `zizmor` | Invalid workflow syntax/expressions, mutable action references, unsafe workflow patterns, and selected privilege/input hazards | 2–5 minutes including pinned scanner setup |
@@ -66,15 +66,15 @@ cargo check --locked --manifest-path src-tauri/Cargo.toml
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-Core tests require `ffmpeg`, `ffprobe`, and pinned `yt-dlp` `2025.2.19` on `PATH`. The Tauri host check requires the platform prerequisites from the [Tauri v2 setup guide](https://v2.tauri.app/start/prerequisites/). Workflow checks require `actionlint`, `zizmor`, and Gitleaks; CI pins their versions.
+Core tests require `ffmpeg`, `ffprobe`, and pinned `yt-dlp` `2026.8.19` on `PATH`. The Tauri host check requires the platform prerequisites from the [Tauri v2 setup guide](https://v2.tauri.app/start/prerequisites/). Workflow checks require `actionlint`, `zizmor`, and Gitleaks; CI pins their versions.
 
 ## What these checks do not prove
 
 - URL validation runs before external tools. Redirects/DNS lookups performed internally by yt-dlp cannot be revalidated by the application at every hop.
 - The gates do not test live provider availability, provider anti-bot changes, or media behavior against public sites; no live-provider test blocks a PR.
-- The Linux package gate builds and launches a Debian artifact in a headless display. Windows/macOS installed WebView startup is not yet covered. The tag-based release workflow signs Windows/macOS packages and requires a GPG-signed checksum manifest; credential-backed release execution has not been verified.
+- The Linux package gate builds and launches a Debian artifact in a headless display. Windows/macOS installed WebView startup is not yet covered. Stable release tags must point into `main`, build native signed packages, attest package provenance, and require a GPG-signed combined checksum manifest. A manual `workflow_dispatch` from `main` builds the same signed packages and stores them on the workflow run without publishing a release or creating a tag. Credential-backed runs have not been verified.
 - External media tools run outside the process boundary. Tool download checksums and archive-path tests reduce install risk, but CI does not prove upstream tool publishers or the checksum catalog are uncompromised.
-- Process execution is limited to one active download; additional submissions enter a durable FIFO queue. Diagnostics retention is bounded. The subprocess output path currently uses unbounded line channels; limiting noisy/oversized child output remains a production reliability improvement not enforced by this gate.
+- Process execution is limited to one active download; additional submissions enter a durable FIFO queue. Diagnostics retention is bounded. Subprocess output is drained continuously through a 128-message bounded queue; full queues drop diagnostic events and individual lines over 8 KiB are discarded.
 - SQLite migration, privacy filtering, crash-state recovery, queue sequencing/cancellation, and explicit retry paths have deterministic core tests. Full UI-driven provider analysis/download and process-kill/relaunch scenarios still need broader end-to-end coverage.
 - Linux CI builds the Debian package, inspects its bundled executable/desktop entry, and launches it under a virtual display. Windows/macOS installer launch smoke coverage and signed release validation remain outstanding.
 

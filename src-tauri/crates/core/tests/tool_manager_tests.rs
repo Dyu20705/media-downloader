@@ -12,17 +12,17 @@ fn test_pinned_versions_catalog() {
     assert_eq!(PINNED_TOOLS.len(), 4);
 
     let ytdlp = get_pinned_tool_spec("yt-dlp").expect("yt-dlp must be pinned");
-    assert_eq!(ytdlp.pinned_version, "2025.02.19");
+    assert_eq!(ytdlp.pinned_version, "2026.08.19");
     assert!(ytdlp.is_required);
     assert_eq!(ytdlp.license, "Unlicense");
 
     let ffmpeg = get_pinned_tool_spec("ffmpeg").expect("ffmpeg must be pinned");
-    assert_eq!(ffmpeg.pinned_version, "7.1");
+    assert_eq!(ffmpeg.pinned_version, "9.0.2");
     assert!(ffmpeg.is_required);
     assert!(ffmpeg.license.contains("GPL"));
 
     let ffprobe = get_pinned_tool_spec("ffprobe").expect("ffprobe must be pinned");
-    assert_eq!(ffprobe.pinned_version, "7.1");
+    assert_eq!(ffprobe.pinned_version, "9.0.2");
     assert!(ffprobe.is_required);
 
     let mediainfo = get_pinned_tool_spec("mediainfo").expect("mediainfo must be pinned");
@@ -70,9 +70,9 @@ async fn test_installation_atomicity_and_staging_cleanup() {
 
     // Create a mock executable script/binary
     let mock_binary: &[u8] = if cfg!(windows) {
-        b"@echo off\r\necho 2025.02.19\r\n"
+        b"@echo off\r\necho 2026.08.19\r\n"
     } else {
-        b"#!/bin/sh\necho 2025.02.19\n"
+        b"#!/bin/sh\necho 2026.08.19\n"
     };
 
     let mock_hash = {
@@ -95,7 +95,7 @@ async fn test_installation_atomicity_and_staging_cleanup() {
     let status_after = install_result.unwrap();
     assert_eq!(status_after.status, ToolStatus::Ready);
     assert!(status_after.managed);
-    assert_eq!(status_after.pinned_version, "2025.02.19");
+    assert_eq!(status_after.pinned_version, "2026.08.19");
 
     // Verify staging directory is cleaned up
     let staging_dir = manager.get_staging_dir();
@@ -112,7 +112,7 @@ async fn test_installation_atomicity_and_staging_cleanup() {
     let manifest = manager.load_manifest();
     assert!(manifest.tools.contains_key("yt-dlp"));
     let entry = manifest.tools.get("yt-dlp").unwrap();
-    assert_eq!(entry.version, "2025.02.19");
+    assert_eq!(entry.version, "2026.08.19");
     assert!(entry.verified);
     assert_eq!(entry.sha256, mock_hash);
 }
@@ -173,9 +173,9 @@ async fn test_resolution_order_priority() {
     let custom_exe_path = explicit_dir.path().join(custom_exe_name);
 
     if cfg!(windows) {
-        fs::write(&custom_exe_path, b"@echo off\r\necho 2025.02.19\r\n").unwrap();
+        fs::write(&custom_exe_path, b"@echo off\r\necho 2026.08.19\r\n").unwrap();
     } else {
-        fs::write(&custom_exe_path, b"#!/bin/sh\necho 2025.02.19\n").unwrap();
+        fs::write(&custom_exe_path, b"#!/bin/sh\necho 2026.08.19\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -236,14 +236,14 @@ async fn test_archive_derived_binary_tampering_is_rejected() {
         Arc::new(DiagnosticsBuffer::new()),
     );
     let original: &[u8] = if cfg!(windows) {
-        b"@echo off\r\necho ffmpeg version 7.1\r\n"
+        b"@echo off\r\necho ffmpeg version 9.0.2\r\n"
     } else {
-        b"#!/bin/sh\necho 'ffmpeg version 7.1'\n"
+        b"#!/bin/sh\necho 'ffmpeg version 9.0.2'\n"
     };
     let replacement: &[u8] = if cfg!(windows) {
-        b"@echo off\r\necho ffmpeg version 7.1 modified\r\n"
+        b"@echo off\r\necho ffmpeg version 9.0.2 modified\r\n"
     } else {
-        b"#!/bin/sh\necho 'ffmpeg version 7.1 modified'\n"
+        b"#!/bin/sh\necho 'ffmpeg version 9.0.2 modified'\n"
     };
     let hash = {
         let temp = tempdir().unwrap();
@@ -257,7 +257,7 @@ async fn test_archive_derived_binary_tampering_is_rejected() {
         .await
         .unwrap();
     let installed = manager
-        .get_version_dir("ffmpeg", "7.1")
+        .get_version_dir("ffmpeg", "9.0.2")
         .join(if cfg!(windows) {
             "ffmpeg.exe"
         } else {
@@ -286,9 +286,9 @@ async fn test_reinstall_and_repair_flow() {
     let manager = ToolManager::new(Some(tools_dir.path().to_path_buf()), diag);
 
     let mock_binary: &[u8] = if cfg!(windows) {
-        b"@echo off\r\necho 2025.02.19\r\n"
+        b"@echo off\r\necho 2026.08.19\r\n"
     } else {
-        b"#!/bin/sh\necho 2025.02.19\n"
+        b"#!/bin/sh\necho 2026.08.19\n"
     };
 
     let mock_hash = {
@@ -307,7 +307,7 @@ async fn test_reinstall_and_repair_flow() {
     assert_eq!(status_1.status, ToolStatus::Ready);
 
     // Corrupt active binary
-    let target_dir = manager.get_version_dir("yt-dlp", "2025.02.19");
+    let target_dir = manager.get_version_dir("yt-dlp", "2026.08.19");
     let bin_name = if cfg!(windows) {
         "yt-dlp.exe"
     } else {

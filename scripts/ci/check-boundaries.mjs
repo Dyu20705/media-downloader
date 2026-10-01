@@ -114,10 +114,18 @@ assert.match(await readFile(join(frontendRoot, 'index.css'), 'utf8'), /@import\s
   'Tailwind Vite integration must have a Tailwind CSS entry point');
 
 const csp = tauriConfig.app.security.csp;
-const directives = new Map(csp.split(';').map((entry) => {
-  const [name, ...values] = entry.trim().split(/\s+/);
-  return [name, values];
-}));
+function parseCsp(value) {
+  return new Map(value.split(';').filter((entry) => entry.trim()).map((entry) => {
+    const [name, ...values] = entry.trim().split(/\s+/);
+    return [name, values];
+  }));
+}
+const directives = parseCsp(csp);
+const securityDoc = await readFile(join(repositoryRoot, 'docs/security.md'), 'utf8');
+const documentedCsp = securityDoc.match(/Defined in `src-tauri\/tauri\.conf\.json`:\s*```text\s*([\s\S]*?)```/)?.[1];
+assert.ok(documentedCsp, 'Security documentation must include the configured CSP');
+assert.deepEqual(parseCsp(documentedCsp), directives,
+  'Security documentation CSP must exactly match the Tauri configuration');
 assert.ok(directives.get('script-src')?.includes("'self'"), 'CSP must restrict scripts to the application origin');
 assert.ok(!directives.get('script-src')?.some((value) => ['*', "'unsafe-eval'"].includes(value)),
   'CSP must not allow wildcard or eval-based scripts');
@@ -126,6 +134,12 @@ assert.ok(directives.get('frame-src')?.includes("'none'"), 'CSP must keep frames
 assert.ok(directives.get('connect-src')?.includes('ipc:'), 'CSP must retain Tauri IPC');
 assert.ok(directives.get('connect-src')?.includes(`http://localhost:${vite.server.port}`),
   'CSP must allow the configured local development server');
+assert.deepEqual(directives.get('connect-src'), ["'self'", 'ipc:', `http://localhost:${vite.server.port}`],
+  'CSP must limit frontend connections to the app, Tauri IPC, and local development server');
+assert.ok(!directives.get('style-src')?.some((value) => value.includes('fonts.googleapis.com')),
+  'CSP must not permit remote Google Fonts stylesheets');
+assert.ok(!directives.get('font-src')?.some((value) => value.includes('fonts.gstatic.com')),
+  'CSP must not permit remote Google Fonts');
 
 const capabilitiesRoot = join(repositoryRoot, 'src-tauri/capabilities');
 const capabilities = (await readdir(capabilitiesRoot)).filter((name) => name.endsWith('.json'));
@@ -136,6 +150,10 @@ for (const name of capabilities) {
     assert.ok(!/^(shell|fs):/.test(permission),
       `${name} must not grant arbitrary shell or filesystem plugin permission (${permission})`);
   }
+  assert.deepEqual(capability.permissions.filter((permission) => permission.startsWith('dialog:')),
+    ['dialog:allow-open'], `${name} must grant only the folder selection dialog permission`);
+  assert.ok(!capability.permissions.some((permission) => permission.startsWith('opener:')),
+    `${name} must not grant opener permissions without frontend use`);
 }
 
 console.log(`CI boundary checks passed (${violations.length} frontend capability violations).`);

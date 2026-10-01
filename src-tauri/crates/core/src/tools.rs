@@ -18,9 +18,12 @@ pub struct ToolResolver {
 
 impl ToolResolver {
     pub fn new() -> Self {
-        let diag = Arc::new(DiagnosticsBuffer::new());
+        Self::with_diagnostics(Arc::new(DiagnosticsBuffer::new()))
+    }
+
+    pub fn with_diagnostics(diagnostics: Arc<DiagnosticsBuffer>) -> Self {
         Self {
-            manager: ToolManager::new(None, diag),
+            manager: ToolManager::new(None, diagnostics),
         }
     }
 

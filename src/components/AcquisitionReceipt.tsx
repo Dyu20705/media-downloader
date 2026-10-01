@@ -15,10 +15,6 @@ import {
 } from 'lucide-react';
 import {
   DownloadJob,
-  ExplainableResult,
-  MediaFingerprint,
-  DownloadRecipe,
-  VerificationResult,
 } from '../types';
 import { PlanActualComparison } from './PlanActualComparison';
 

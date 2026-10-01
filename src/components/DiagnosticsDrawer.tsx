@@ -24,19 +24,15 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'logs' | 'command'>('logs');
   const [commandPreview, setCommandPreview] = useState<string>(initialCmd);
-  const [isLoadingCmd, setIsLoadingCmd] = useState<boolean>(false);
 
   const handleSwitchToCommand = async () => {
     setActiveTab('command');
     if (onFetchCommandPreview && !commandPreview) {
       try {
-        setIsLoadingCmd(true);
         const cmd = await onFetchCommandPreview();
         setCommandPreview(cmd);
       } catch {
-        // ignore
-      } finally {
-        setIsLoadingCmd(false);
+        setCommandPreview('Command preview unavailable.');
       }
     }
   };

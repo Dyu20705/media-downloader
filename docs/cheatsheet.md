@@ -38,8 +38,8 @@ Clip and Chapter perform fast time-range cuts; boundaries can align to nearby ke
 
 One-Click Media Downloader manages required external helper tools in an isolated, application-local directory without modifying global Windows `PATH` or registry keys:
 
-- **yt-dlp (`v2025.02.19`)**: Media stream extraction engine.
-- **FFmpeg & FFprobe (`v7.1`)**: Audio/video muxing, stream merging, post-processing, and format conversion.
+- **yt-dlp (`v2026.08.19`)**: Media stream extraction engine.
+- **FFmpeg & FFprobe (`v9.0.2`)**: Audio/video muxing, stream merging, post-processing, and format conversion.
 - **MediaInfo (`v24.12`)**: Container verification and stream inspection.
 
 ### Tool Resolution Order
@@ -56,10 +56,7 @@ One-Click Media Downloader manages required external helper tools in an isolated
 - **Embed Thumbnail (`--embed-thumbnail`)**: Embeds full-resolution artwork into the file so file managers (Windows Explorer, Finder) display cover art.
 - **Embed Chapters (`--embed-chapters`)**: Injects timestamp markers for videos with multiple segments.
 - **Trim Filenames**: Automatically limits output filename length (default: 180 characters) to prevent Windows MAX_PATH (260 char) filesystem errors.
-- **Extreme Performance Baseline**:
-  - Enforces 1 active download job at a time to prevent disk I/O bottlenecks and ISP bandwidth contention.
-  - Streaming updates throttled to 4 Hz to guarantee zero UI stutter.
-  - O(1) memory consumption with zero unbounded media buffer retention.
+- **Resource handling**: One download is active at a time; progress updates and diagnostic retention are bounded. See [performance characteristics](performance.md) for the exact limits and their scope.
 
 ---
 

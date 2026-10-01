@@ -8,8 +8,6 @@ import {
   ChevronDown, 
   ChevronUp, 
   Wrench, 
-  HardDrive,
-  FileCode2
 } from 'lucide-react';
 import { ToolStatusInfo } from '../types';
 
@@ -30,7 +28,6 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
   onRepairTool,
   onInstallAll,
   onRefresh,
-  onOpenAdvancedModal,
 }) => {
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);

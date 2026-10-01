@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' ipc: http://localhost:3000 https://github.com https://*.githubusercontent.com; frame-src 'none'; object-src 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: blob:; connect-src 'self' ipc: http://localhost:3000; frame-src 'none'; object-src 'none'"
     }
   },
   "bundle": {
@@ -53,8 +53,5 @@
       },
       "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/sign-windows.ps1 %1"
     }
-  },
-  "plugins": {
-    "opener": {}
   }
 }

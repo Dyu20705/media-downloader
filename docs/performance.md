@@ -1,45 +1,17 @@
-# Performance Contract & Benchmarks — One-Click Media Downloader
+# Performance characteristics
 
-## 1. Performance Guarantees
+This document records architectural bounds and targets. It does not claim measured CPU, memory, or latency results; reproducible benchmarks are not currently maintained.
 
-| Metric | Target / Ceiling | Measured / Architecture Guarantee | Status |
-| :--- | :--- | :--- | :--- |
-| **Max Concurrent Downloads** | 1 active job | Mutex + State Machine lock (Reject concurrent jobs) | **PASS** |
-| **UI Telemetry Rate** | <= 4 Hz (250 ms) | Timer-coalesced line parsing in `download_manager.rs` | **PASS** |
-| **Diagnostics Memory** | <= 64 KiB (256 lines) | `DiagnosticsBuffer` byte counter & ring buffer | **PASS** |
-| **Initial JS Bundle (Gzip)** | <= 120 KiB | **~57.0 KiB** (Vite + code splitting) | **PASS** |
-| **Total Entry Bundle (Gzip)**| <= 150 KiB | **~66.3 KiB** (JS + CSS combined) | **PASS** |
-| **Idle CPU (60s)** | < 0.5% CPU | Event-driven architecture (No interval polling loops) | **PASS** |
-| **Idle Memory** | < 80 MB | Lean React 18 tree + Rust native backend | **PASS** |
-| **Process Tree Cleanup** | 0 orphaned processes | Windows Job Objects / `taskkill /F /T /PID` + Unix SIGKILL | **PASS** |
+## Enforced bounds
 
----
+- At most one download process is admitted at a time. Additional requests enter the durable FIFO queue.
+- Progress state is updated at most once per 250 ms while processing progress events (a 4 Hz architectural ceiling).
+- Diagnostics retain at most 256 entries and 64 KiB of accounted text.
+- Each subprocess output stream is drained continuously. The consumer queue holds at most 128 messages; when full, diagnostic lines are dropped. Lines larger than 8 KiB are discarded.
+- Frontend polling is enabled only while a download is active; the interval is 400 ms.
 
-## 2. Telemetry & Telemetry Coalescing
+These bounds describe retained application state and event handling. They do not bound memory used internally by third-party tools or system libraries.
 
-Downloads frequently output progress strings at 50–100 Hz. If forwarded unthrottled, React state updates cause thread contention and DOM layout thrashing.
-`DownloadManager` buffers and samples progress telemetry to a maximum frequency of **4 Hz (250 ms)**:
+## Targets and unmeasured expectations
 
-```rust
-// Coalesce progress updates to max 4 Hz
-if last_progress_emit.elapsed() >= Duration::from_millis(250) {
-    if let Some(ref mut job) = *active_job_clone.write().await {
-        job.progress = prog;
-    }
-    last_progress_emit = Instant::now();
-}
-```
-
----
-
-## 3. Bundle Breakdown & Optimization Strategy
-
-1. **Lazy Loading of Secondary Dialogs**:
-   - `SettingsModal` (~7 KiB)
-   - `DiagnosticsDrawer` (~7.6 KiB)
-   - `ToolsModal` (~7.7 KiB)
-   - `MediaInfoModal` (~8.7 KiB)
-   - `HelpCheatsheetModal` (~7.6 KiB)
-   - `DownloadHistoryModal` (~4.0 KiB)
-2. **Bounded Polling**: React polls active-job state every 400 ms only while a download is running; Rust coalesces process telemetry to 4 Hz.
-3. **No Heavy Third-Party Component Suites**: Clean Tailwind styling without heavy runtime CSS-in-JS libraries.
+Bundle-size budgets, idle CPU, and idle memory remain targets only. No current evidence supports a measured pass/fail claim for them. Run platform-specific profiling before publishing quantitative performance claims.
