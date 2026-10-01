@@ -1,4 +1,5 @@
 use chrono::Local;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,6 +26,7 @@ pub struct ActiveJobHandle {
     pub cancel_sender: mpsc::Sender<()>,
 }
 
+#[derive(Clone)]
 pub struct DownloadManager {
     tool_resolver: Arc<ToolResolver>,
     diagnostics: Arc<DiagnosticsBuffer>,
@@ -33,6 +35,7 @@ pub struct DownloadManager {
     active_handle: Arc<Mutex<Option<ActiveJobHandle>>>,
     admission_lock: Arc<Mutex<()>>,
     job_store: Option<Arc<JobStore>>,
+    pending_queue: Arc<Mutex<VecDeque<(String, StartDownloadRequest)>>>,
 }
 
 impl DownloadManager {
@@ -49,6 +52,7 @@ impl DownloadManager {
             active_handle: Arc::new(Mutex::new(None)),
             admission_lock: Arc::new(Mutex::new(())),
             job_store: None,
+            pending_queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -114,23 +118,25 @@ impl DownloadManager {
         &self,
         request: StartDownloadRequest,
     ) -> Result<DownloadJob, String> {
+        self.start_download_with_id(request, None).await
+    }
+
+    async fn start_download_with_id(
+        &self,
+        request: StartDownloadRequest,
+        queued_job_id: Option<String>,
+    ) -> Result<DownloadJob, String> {
         // Admission, process spawn, and slot publication are one atomic operation.
         let _admission_guard = self.admission_lock.lock().await;
-
-        if let Some(existing) = self.get_active_job().await {
-            if matches!(
+        let is_busy = self.get_active_job().await.is_some_and(|existing| {
+            matches!(
                 existing.status,
                 DownloadStatus::Downloading
                     | DownloadStatus::PostProcessing
                     | DownloadStatus::Verifying
                     | DownloadStatus::Cancelling
-            ) {
-                return Err(
-                    "A download is already in progress. Only 1 concurrent download is permitted."
-                        .to_string(),
-                );
-            }
-        }
+            )
+        });
 
         // Bind admission to the plan the user reviewed, before filesystem or network work.
         let source_graph = crate::media_graph::MediaGraph::build_source_graph(
@@ -147,6 +153,39 @@ impl DownloadManager {
             return Err(
                 "Acquisition plan changed. Review the updated plan before downloading.".into(),
             );
+        }
+        if is_busy && queued_job_id.is_none() {
+            let id = format!(
+                "job-{}-{}",
+                Local::now().timestamp_millis(),
+                std::process::id()
+            );
+            let queued = DownloadJob {
+                id: id.clone(),
+                url: request.metadata.webpage_url.clone(),
+                output_directory: request.acquisition.output_directory.clone(),
+                status: DownloadStatus::Queued,
+                progress: DownloadProgress::default(),
+                metadata: request.metadata.clone(),
+                final_file_name: None,
+                final_file_path: None,
+                inspection: None,
+                error_message: None,
+                created_at: Local::now().to_rfc3339(),
+                completed_at: None,
+                intent: None,
+                recipe: None,
+                fingerprint: None,
+                explainable_result: None,
+                verification: None,
+                acquisition_plan: plan,
+                acquisition_request: Some(request.acquisition.clone()),
+            };
+            if let Some(store) = &self.job_store {
+                store.save(&queued)?;
+            }
+            self.pending_queue.lock().await.push_back((id, request));
+            return Ok(queued);
         }
         for tool in required_tools(&plan)? {
             self.tool_resolver.resolve_tool_with_settings(tool, Some(&current_settings))
@@ -191,7 +230,13 @@ impl DownloadManager {
             ),
         )?;
 
-        let job_id = format!("job-{}", Local::now().timestamp_millis());
+        let job_id = queued_job_id.unwrap_or_else(|| {
+            format!(
+                "job-{}-{}",
+                Local::now().timestamp_millis(),
+                std::process::id()
+            )
+        });
         let now_str = Local::now().to_rfc3339();
 
         let initial_job = DownloadJob {
@@ -268,6 +313,7 @@ impl DownloadManager {
         let is_lossy_warning = compiled.is_lossy_conversion;
         let verification_settings = current_settings.clone();
         let job_store = self.job_store.clone();
+        let queue_manager = self.clone();
 
         tokio::spawn(async move {
             let mut state_machine = DownloadStateMachine::with_state(DownloadStatus::Downloading);
@@ -552,12 +598,73 @@ impl DownloadManager {
                 }
             }
             *active_handle_clone.lock().await = None;
+            queue_manager.schedule_queue_drain();
         });
 
         Ok(initial_job)
     }
 
+    fn schedule_queue_drain(&self) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            manager.start_next_queued().await;
+        });
+    }
+
+    async fn start_next_queued(&self) {
+        loop {
+            let next = self.pending_queue.lock().await.pop_front();
+            let Some((job_id, request)) = next else {
+                return;
+            };
+            if let Err(error) = self
+                .start_download_with_id(request, Some(job_id.clone()))
+                .await
+            {
+                if let Some(store) = &self.job_store {
+                    if let Ok(Some(mut job)) = store
+                        .list(500)
+                        .map(|jobs| jobs.into_iter().find(|job| job.id == job_id))
+                    {
+                        job.status = DownloadStatus::Failed;
+                        job.error_message =
+                            Some(format!("Queued download could not start: {error}"));
+                        job.completed_at = Some(Local::now().to_rfc3339());
+                        let _ = store.save(&job);
+                    }
+                }
+                self.diagnostics.log(
+                    "ERROR",
+                    "QUEUE",
+                    "A queued download could not start; see its history record for details.",
+                );
+            } else {
+                return;
+            }
+        }
+    }
+
     pub async fn cancel_download(&self, job_id: &str) -> Result<DownloadJob, String> {
+        {
+            let mut queue = self.pending_queue.lock().await;
+            if let Some(index) = queue.iter().position(|(id, _)| id == job_id) {
+                queue.remove(index);
+                let store = self
+                    .job_store
+                    .as_ref()
+                    .ok_or("Persistent history is unavailable")?;
+                let mut job = store
+                    .list(500)?
+                    .into_iter()
+                    .find(|job| job.id == job_id)
+                    .ok_or("Queued job record is missing")?;
+                job.status = DownloadStatus::Cancelled;
+                job.completed_at = Some(Local::now().to_rfc3339());
+                job.error_message = Some("Cancelled while waiting in the download queue.".into());
+                store.save(&job)?;
+                return Ok(job);
+            }
+        }
         let cancellation_sent = {
             let handle_guard = self.active_handle.lock().await;
             if let Some(handle) = handle_guard.as_ref() {
@@ -757,9 +864,49 @@ mod tests {
         assert_eq!(receiver.recv().await, Some(()));
     }
 
+    #[tokio::test]
+    async fn queued_jobs_can_be_cancelled_without_running() {
+        let manager = DownloadManager::new(
+            Arc::new(ToolResolver::new()),
+            Arc::new(DiagnosticsBuffer::new()),
+            Arc::new(SettingsManager::new()),
+        )
+        .with_job_store(Arc::new(
+            crate::persistence::JobStore::open_in_memory().unwrap(),
+        ));
+        let mut queued = test_job();
+        queued.id = "job-queued-cancel".into();
+        queued.status = DownloadStatus::Queued;
+        manager.job_store.as_ref().unwrap().save(&queued).unwrap();
+        manager.pending_queue.lock().await.push_back((
+            queued.id.clone(),
+            StartDownloadRequest {
+                expected_plan_id: queued.acquisition_plan.id.clone(),
+                metadata: queued.metadata.clone(),
+                acquisition: AcquisitionRequest {
+                    source_scope: SourceScope::SingleMedia,
+                    operation: AcquisitionOperation::EntireMedia,
+                    output_profile: OutputProfile::Universal,
+                    track_selection: TrackSelection::default(),
+                    metadata_patch: None,
+                    duplicate_policy: DuplicatePolicy::Rename,
+                    output_directory: "/tmp".into(),
+                    max_video_height: None,
+                },
+            },
+        ));
+        let cancelled = manager.cancel_download(&queued.id).await.unwrap();
+        assert_eq!(cancelled.status, DownloadStatus::Cancelled);
+        assert!(manager.pending_queue.lock().await.is_empty());
+        assert_eq!(
+            manager.list_jobs(10).unwrap()[0].status,
+            DownloadStatus::Cancelled
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
-    async fn simultaneous_starts_reserve_only_one_download_slot() {
+    async fn simultaneous_starts_queue_and_execute_sequentially() {
         let tools_directory = tempfile::tempdir().unwrap();
         let output_directory = tempfile::tempdir().unwrap();
         let diagnostics = Arc::new(DiagnosticsBuffer::new());
@@ -767,7 +914,7 @@ mod tests {
             Some(tools_directory.path().to_path_buf()),
             diagnostics.clone(),
         );
-        let fake_ytdlp = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2025.02.19; exit 0; fi\nsleep 5\nexit 1\n";
+        let fake_ytdlp = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2025.02.19; exit 0; fi\nsleep 0.1\nexit 1\n";
         let source = tools_directory.path().join("source");
         std::fs::write(&source, fake_ytdlp).unwrap();
         let hash = ToolManager::compute_sha256(&source).unwrap();
@@ -776,11 +923,16 @@ mod tests {
             .await
             .unwrap();
 
-        let manager = Arc::new(DownloadManager::new(
-            Arc::new(ToolResolver::with_manager(tool_manager)),
-            diagnostics,
-            Arc::new(SettingsManager::new()),
-        ));
+        let manager = Arc::new(
+            DownloadManager::new(
+                Arc::new(ToolResolver::with_manager(tool_manager)),
+                diagnostics,
+                Arc::new(SettingsManager::new()),
+            )
+            .with_job_store(Arc::new(
+                crate::persistence::JobStore::open_in_memory().unwrap(),
+            )),
+        );
         let mut request = StartDownloadRequest {
             expected_plan_id: String::new(),
             metadata: test_job().metadata,
@@ -823,25 +975,58 @@ mod tests {
             async move { second_manager.start_download(request).await }
         );
 
-        let started = match (first, second) {
-            (Ok(started), Err(error)) | (Err(error), Ok(started)) => {
-                assert!(error.contains("A download is already in progress"));
-                started
+        let (running, queued) = match (first.unwrap(), second.unwrap()) {
+            (left, right)
+                if left.status == DownloadStatus::Downloading
+                    && right.status == DownloadStatus::Queued =>
+            {
+                (left, right)
             }
-            results => panic!("expected exactly one admitted download, got {results:?}"),
+            (left, right)
+                if right.status == DownloadStatus::Downloading
+                    && left.status == DownloadStatus::Queued =>
+            {
+                (right, left)
+            }
+            results => panic!("expected one running and one queued job, got {results:?}"),
         };
-        let cancelled = manager.cancel_download(&started.id).await.unwrap();
-        assert_eq!(cancelled.status, DownloadStatus::Cancelling);
-        tokio::time::timeout(Duration::from_secs(2), async {
+        assert_eq!(manager.list_jobs(10).unwrap().len(), 2);
+        tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if manager
-                    .get_active_job()
-                    .await
-                    .is_some_and(|job| job.status == DownloadStatus::Cancelled)
+                let history = manager.list_jobs(10).unwrap();
+                let running_status = history
+                    .iter()
+                    .find(|job| job.id == running.id)
+                    .map(|job| job.status);
+                let queued_status = history
+                    .iter()
+                    .find(|job| job.id == queued.id)
+                    .map(|job| job.status);
+                if running_status == Some(DownloadStatus::Failed)
+                    && queued_status == Some(DownloadStatus::Failed)
                 {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let retried = manager.retry_job(&queued.id).await.unwrap();
+        assert_ne!(retried.id, queued.id);
+        assert_eq!(retried.status, DownloadStatus::Downloading);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if manager
+                    .list_jobs(10)
+                    .unwrap()
+                    .iter()
+                    .any(|job| job.id == retried.id && job.status == DownloadStatus::Failed)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
         .await

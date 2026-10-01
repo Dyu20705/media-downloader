@@ -1,0 +1,157 @@
+name: Signed desktop release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require matching version tag from dev
+        run: |
+          set -eu
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          test "$GITHUB_REF_NAME" = "v$version"
+          git fetch origin dev
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/dev
+          grep -Fq "## $version" CHANGELOG.md
+  package:
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundle: deb
+            artifact: linux-deb
+          - os: windows-latest
+            bundle: nsis
+            artifact: windows-nsis
+          - os: macos-latest
+            bundle: dmg
+            artifact: macos-dmg
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes build-essential curl file libayatana-appindicator3-dev libgtk-3-dev libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev pkg-config
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.96.0
+      - run: npm ci --no-audit --fund=false
+      - name: Require/import Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:WINDOWS_CERTIFICATE_THUMBPRINT) { throw 'Windows production signing secrets are required.' }
+          $pfx = Join-Path $env:RUNNER_TEMP 'openDownloader-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          Remove-Item -Force $pfx
+      - name: Require Apple signing and notarization credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -eu
+          test -n "$APPLE_CERTIFICATE" && test -n "$APPLE_CERTIFICATE_PASSWORD" && test -n "$APPLE_SIGNING_IDENTITY"
+          test -n "$APPLE_API_ISSUER" && test -n "$APPLE_API_KEY" && test -n "$APPLE_API_KEY_CONTENT" && test -n "$APPLE_TEAM_ID"
+          keychain="$RUNNER_TEMP/openDownloader-signing.keychain-db"
+          certificate="$RUNNER_TEMP/openDownloader-signing.p12"
+          api_key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          keychain_password=$(openssl rand -hex 24)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$api_key"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          rm -f "$certificate"
+          echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
+      - name: Build signed platform bundle
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+      - name: Create bundle checksums
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p release-artifacts
+          case "${{ matrix.bundle }}" in
+            deb) cp src-tauri/target/release/bundle/deb/*.deb release-artifacts/ ;;
+            nsis) cp src-tauri/target/release/bundle/nsis/*-setup.exe release-artifacts/ ;;
+            dmg) cp src-tauri/target/release/bundle/dmg/*.dmg release-artifacts/ ;;
+          esac
+          cd release-artifacts
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: production-release
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Require GPG key, sign manifest, and verify bundles
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          set -eu
+          test -n "$RELEASE_GPG_PRIVATE_KEY" -a -n "$RELEASE_GPG_PASSPHRASE" || { echo 'Production publishing requires RELEASE_GPG_PRIVATE_KEY and RELEASE_GPG_PASSPHRASE.' >&2; exit 1; }
+          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*-setup.exe' -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
+          cd release-assets
+          sha256sum *.deb *-setup.exe *.dmg > SHA256SUMS
+          printf '%s' "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
+          printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --detach-sign --armor SHA256SUMS
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --title "openDownloader $GITHUB_REF_NAME" --notes-file CHANGELOG.md

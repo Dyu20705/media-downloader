@@ -340,6 +340,7 @@ export const App: React.FC = () => {
         jobs={allJobs}
         onInspect={handleOpenJobDetails}
         onRetry={(job) => { void retryDownload(job.id); modals.setIsHistoryOpen(false); }}
+        onCancel={(job) => { void cancelDownload(job.id); }}
       />
 
       <ToolsModal

@@ -10,6 +10,7 @@ interface DownloadHistoryModalProps {
   jobs: DownloadJob[];
   onInspect: (job: DownloadJob) => void;
   onRetry: (job: DownloadJob) => void;
+  onCancel: (job: DownloadJob) => void;
 }
 
 export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
@@ -18,6 +19,7 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
   jobs,
   onInspect,
   onRetry,
+  onCancel,
 }) => {
   if (!isOpen) return null;
 
@@ -87,7 +89,10 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                     </h3>
                   </div>
                   <div className="text-[11px] text-zinc-400 flex items-center gap-2">
-                    <span>{operationLabel(job.acquisitionPlan.operation)} · {profileLabel(job.acquisitionPlan.outputProfile)}</span>
+                    <span className={job.status === 'QUEUED' ? 'text-blue-300' : job.status === 'INTERRUPTED' ? 'text-amber-300' : ''}>
+                      {job.status === 'QUEUED' ? 'Queued · ' : job.status === 'INTERRUPTED' ? 'Interrupted · ' : ''}
+                      {operationLabel(job.acquisitionPlan.operation)} · {profileLabel(job.acquisitionPlan.outputProfile)}
+                    </span>
                     <span>•</span>
                     <span className="font-mono text-zinc-500 truncate max-w-[200px] sm:max-w-xs">
                       {job.finalFileName || job.url}
@@ -117,6 +122,16 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                         <FolderOpen className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     </>
+                  )}
+                  {job.status === 'QUEUED' && (
+                    <button
+                      type="button"
+                      onClick={() => onCancel(job)}
+                      className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-red-900 text-zinc-200 text-xs font-medium focus-visible:ring-2 focus-visible:ring-blue-300"
+                      aria-label={`Cancel queued ${job.metadata?.title || 'download'}`}
+                    >
+                      Cancel
+                    </button>
                   )}
                   {['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(job.status) && (
                     <button

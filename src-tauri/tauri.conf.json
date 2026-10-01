@@ -36,7 +36,7 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright © 2026 One-Click Media Downloader Authors",
+    "copyright": "Copyright \u00a9 2026 One-Click Media Downloader Authors",
     "category": "Utility",
     "shortDescription": "One-Click Media Downloader desktop application for high-quality audio and video extraction.",
     "longDescription": "A robust, offline-capable desktop media downloader powered by yt-dlp, FFmpeg, and MediaInfo, providing clean presets and deep technical inspection.",
@@ -46,9 +46,12 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English"],
+        "languages": [
+          "English"
+        ],
         "displayLanguageSelector": false
-      }
+      },
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/sign-windows.ps1 %1"
     }
   },
   "plugins": {

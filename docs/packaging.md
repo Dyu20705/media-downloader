@@ -2,11 +2,11 @@
 
 ## 0. Release status and required evidence
 
-The repository is not yet approved for production distribution. SQLite history and startup interruption recovery are implemented, but this repository does not yet verify install-and-launch behavior on every desktop platform or provide a signed release workflow. Treat unsigned local bundles as development artifacts.
+The repository has a tag-based signed release workflow and a Linux packaged launch smoke test. No signed release has been produced; Windows/macOS launch checks and the real credential-backed signing/notarization path remain unverified. Local bundles are development artifacts.
 
 ## 1. Distribution Strategy
 
-One-Click Media Downloader targets Windows 10/11 x64 as a standalone executable (`.exe`) and lightweight installer (`.exe` via NSIS).
+The release matrix builds a Debian package for Linux x64, a Windows 10/11 x64 NSIS installer, and a macOS DMG on the hosted macOS runner architecture. Cross-platform core tests run on Ubuntu, Windows, and macOS.
 
 ### 1.1 WebView2 Strategy
 - **Mode**: `downloadBootstrapper` (recommended default).
@@ -25,7 +25,7 @@ Configured in `src-tauri/tauri.conf.json`:
   - Identifier: `com.oneclick.media.downloader`
   - Publisher: `One-Click Media Downloader Team`
 - **Application Data Locations**:
-  - Settings: application-specific configuration directory (see `settings.rs`).
+  - Settings: `%APPDATA%\one-click-media-downloader\settings.json` on Windows (see `settings.rs`); platform config directory on macOS/Linux.
   - Download history: `%LOCALAPPDATA%\openDownloader\downloads.sqlite3` on Windows; the equivalent local application-data directory on macOS/Linux.
   - Managed Tools: `%LOCALAPPDATA%\OneClickMediaDownloader\tools\`
 
@@ -75,6 +75,13 @@ In GitHub Actions / Azure DevOps:
 3. Sign using `signtool` before publishing release artifacts.
 4. Immediately wipe certificate files from runner disk.
 
-## Signing and release gate
+## Signed release workflow
 
-No signing secrets belong in the repository. Before production distribution, configure platform signing credentials as protected CI secrets and require successful signing/notarization for the relevant release target. Unsigned bundles must not be labeled production-signed. Artifact checksums and release metadata should be generated from the exact published artifacts.
+Push a tag such as v1.0.0 only after the matching version commit is on dev and CHANGELOG.md contains that version. .github/workflows/release.yml builds a Debian package, Windows NSIS installer, and macOS DMG. The workflow rejects mismatched tags and tags outside dev history. Windows signing and verification, macOS Developer ID signing and notarization, and a GPG-signed SHA-256 manifest all fail closed when their secrets are absent. The final publish step requires the protected production-release GitHub environment.
+
+Configure these repository/environment secrets before a production tag:
+- Windows: WINDOWS_CERTIFICATE (base64 PFX), WINDOWS_CERTIFICATE_PASSWORD, WINDOWS_CERTIFICATE_THUMBPRINT.
+- macOS: APPLE_CERTIFICATE (base64 P12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_CONTENT, APPLE_TEAM_ID.
+- Manifest: RELEASE_GPG_PRIVATE_KEY, RELEASE_GPG_PASSPHRASE.
+
+The workflow does not configure an in-app updater. A future updater requires signed update metadata and a separate tested key-rotation/recovery policy.

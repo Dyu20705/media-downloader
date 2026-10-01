@@ -186,7 +186,7 @@ jobs:
           mkdir package-root
           dpkg-deb --extract "$package" package-root
           test -x package-root/usr/bin/one-click-media-downloader
-          test -f package-root/usr/share/applications/com.oneclick.media.downloader.desktop
+          test -f "package-root/usr/share/applications/One-Click Media Downloader.desktop"
       - name: Launch packaged application under a virtual display
         run: |
           set +e

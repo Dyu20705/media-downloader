@@ -15,7 +15,7 @@ Paste URL → analyze → configure acquisition → review backend plan → exec
 
 Supported operations are Entire Media, Audio Only, Clip, Chapter, Thumbnail (JPEG), and Subtitles (one WebVTT language per job). Profiles are Best Source, Universal, Editing, and Small. Whole-playlist execution is unavailable. When a URL includes a playlist, “This video” remains the safe default; the executor uses explicit no-playlist behavior.
 
-The Rust planner is authoritative. Before execution, the backend recomputes the plan against current settings and rejects a stale plan ID. Processes are invoked with argument vectors, never through a shell. Only one download process may run at a time.
+Requests beyond the active job enter a durable FIFO queue. Only one process executes at a time; queued items can be cancelled before execution. On restart, queued items are marked interrupted and require explicit retry. The Rust planner is authoritative. Before execution, the backend recomputes the plan against current settings and rejects a stale plan ID. Processes are invoked with argument vectors, never through a shell. Only one download process may run at a time.
 
 ## Persistence and recovery
 
@@ -31,7 +31,7 @@ Diagnostics use a bounded in-memory buffer and sanitize URLs, credentials, cooki
 
 ## Validation
 
-The tracked Vite config pins the development server to port 3000 with strict port behavior and configures React and Tailwind. Contract CI runs on pushes to `dev` and `main` and on pull requests targeting either branch. Shared Rust core checks run on Ubuntu, Windows, and macOS. The project does not yet have a complete signed-release pipeline or verified installation-and-launch smoke coverage for all three platforms; do not describe it as production-ready until those gates pass.
+The tracked Vite config pins the development server to port 3000 with strict port behavior and configures React and Tailwind. Contract CI runs on pushes to `dev` and `main` and on pull requests targeting either branch. Shared Rust core checks run on Ubuntu, Windows, and macOS. The version-tagged release workflow builds Windows, macOS, and Linux packages, requires Windows/macOS signing credentials, signs the release checksum manifest, and publishes only tags that match the app version and point to dev history. It has not been exercised with real signing credentials. Linux package startup is smoke-tested in CI; Windows/macOS installed-app smoke coverage remains unverified.
 
 Useful local checks:
 

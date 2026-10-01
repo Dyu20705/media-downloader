@@ -45,7 +45,7 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
     };
   }, [acceptJob]);
 
-  const isJobRunning = Boolean(activeJob && !TERMINAL_STATUSES.has(activeJob.status));
+  const isJobRunning = allJobs.some((job) => !TERMINAL_STATUSES.has(job.status));
 
   useEffect(() => {
     if (!isJobRunning) return;
@@ -59,7 +59,7 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
       }).catch(() => undefined);
     }, 400);
     return () => window.clearInterval(timer);
-  }, [acceptJob, isJobRunning, onDiagnosticsUpdate]);
+  }, [acceptJob, allJobs, isJobRunning, onDiagnosticsUpdate]);
 
   const startDownload = useCallback(async (request: StartDownloadRequest) => {
     setDownloadError(null);

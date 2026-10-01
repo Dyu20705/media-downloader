@@ -21,7 +21,7 @@
 
 ### 1.3 Cancellation & Recovery
 - **Cancelled Downloads**: The app immediately issues `taskkill /F /T /PID` on Windows or `SIGKILL` on Unix to kill all child processes. Temporary download files (`.part`, `.ytdl`) remain available for resume or can be cleared.
-- **Interrupted Network**: `yt-dlp` automatically resumes byte chunks upon retry without re-downloading existing segments.
+- **Interrupted job**: A process restart marks every queued or in-flight job Interrupted. Retry is explicit and creates a new job/output folder; partial files from the old attempt are retained and are not assumed complete.
 
 ---
 

@@ -4,7 +4,7 @@ These gates establish a production-oriented engineering baseline and reduce spec
 
 ## Pull-request blocking checks
 
-`.github/workflows/contracts.yml` runs for pull requests targeting `dev` or `main`, and pushes to `main`, avoiding duplicate feature-branch push/PR runs. Repository permissions are read-only:
+`.github/workflows/contracts.yml` runs for pull requests targeting `dev` or `main`, and direct pushes to either integration branch. Repository permissions are read-only:
 
 | Check | Risk or regression it detects | Expected cost |
 | --- | --- | --- |
@@ -21,10 +21,10 @@ The npm install-script allowlist is intentionally narrow: only `esbuild@0.25.12`
 
 ## Scheduled/advisory checks
 
-`.github/workflows/security.yml` runs weekly, on pushes to `main`, and manually:
+`.github/workflows/security.yml` runs weekly, on pushes to `dev` or `main`, and manually:
 
 - CodeQL analyzes Rust and TypeScript and publishes code-scanning results. Findings require human triage; this is not a PR merge gate.
-- `cargo-audit` checks both committed Rust lockfiles against the changing RustSec advisory database. A finding makes the scheduled run fail but does not automatically block unrelated PRs.
+- `cargo-audit` checks both committed Rust lockfiles against the changing RustSec advisory database. A finding fails the security workflow on every dev/main push and scheduled run.
 
 The contract workflow runs on direct pushes to `dev` and `main`, and pull requests targeting either branch; feature-branch pushes do not trigger a duplicate full suite.
 
@@ -72,10 +72,10 @@ Core tests require `ffmpeg`, `ffprobe`, and pinned `yt-dlp` `2025.2.19` on `PATH
 
 - URL validation runs before external tools. Redirects/DNS lookups performed internally by yt-dlp cannot be revalidated by the application at every hop.
 - The gates do not test live provider availability, provider anti-bot changes, or media behavior against public sites; no live-provider test blocks a PR.
-- The current tests do not package installers or exercise installed WebViews/OS permissions end-to-end. Signing, notarization, SBOM/provenance, and release artifact inspection require a separately defined release/signing policy.
+- The Linux package gate builds and launches a Debian artifact in a headless display. Windows/macOS installed WebView startup is not yet covered. The tag-based release workflow signs Windows/macOS packages and requires a GPG-signed checksum manifest; credential-backed release execution has not been verified.
 - External media tools run outside the process boundary. Tool download checksums and archive-path tests reduce install risk, but CI does not prove upstream tool publishers or the checksum catalog are uncompromised.
-- Process admission is limited to one active download and diagnostics retention is bounded. The subprocess output path currently uses unbounded line channels; limiting noisy/oversized child output remains a production reliability improvement not enforced by this gate.
-- The SQLite schema and recovery primitives are covered by deterministic core tests; live user-driven retry and restart behavior still need broader end-to-end coverage.
+- Process execution is limited to one active download; additional submissions enter a durable FIFO queue. Diagnostics retention is bounded. The subprocess output path currently uses unbounded line channels; limiting noisy/oversized child output remains a production reliability improvement not enforced by this gate.
+- SQLite migration, privacy filtering, crash-state recovery, queue sequencing/cancellation, and explicit retry paths have deterministic core tests. Full UI-driven provider analysis/download and process-kill/relaunch scenarios still need broader end-to-end coverage.
 - Linux CI builds the Debian package, inspects its bundled executable/desktop entry, and launches it under a virtual display. Windows/macOS installer launch smoke coverage and signed release validation remain outstanding.
 
 No cargo-deny license allowlist is added here: the dependency metadata includes multiple alternative and file-level license expressions, and a durable third-party redistribution policy should be explicitly maintained rather than inferred from a scanner default. The repository's application license and actual locked dependency license expressions were inspected for this decision.
