@@ -54,9 +54,23 @@ impl DownloadStateMachine {
         }
 
         match from {
+            DownloadStatus::Queued => matches!(
+                to,
+                DownloadStatus::Preparing
+                    | DownloadStatus::Downloading
+                    | DownloadStatus::Failed
+                    | DownloadStatus::Cancelled
+            ),
+            DownloadStatus::Preparing => matches!(
+                to,
+                DownloadStatus::Downloading | DownloadStatus::Failed | DownloadStatus::Cancelling
+            ),
             DownloadStatus::Idle => matches!(
                 to,
-                DownloadStatus::Analyzing | DownloadStatus::Ready | DownloadStatus::Downloading
+                DownloadStatus::Analyzing
+                    | DownloadStatus::Ready
+                    | DownloadStatus::Queued
+                    | DownloadStatus::Downloading
             ),
             DownloadStatus::Analyzing => matches!(
                 to,
@@ -83,6 +97,13 @@ impl DownloadStateMachine {
             DownloadStatus::Cancelling => {
                 matches!(to, DownloadStatus::Cancelled | DownloadStatus::Failed)
             }
+            DownloadStatus::Interrupted => matches!(
+                to,
+                DownloadStatus::Queued
+                    | DownloadStatus::Analyzing
+                    | DownloadStatus::Ready
+                    | DownloadStatus::Cancelled
+            ),
             DownloadStatus::Completed | DownloadStatus::Failed | DownloadStatus::Cancelled => {
                 // Terminal states can transition to Idle or Analyzing on restart
                 matches!(

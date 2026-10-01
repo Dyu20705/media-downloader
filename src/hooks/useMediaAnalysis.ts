@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
 import { ipc } from '../services/ipc';
+import { sanitizeTechnicalError } from '../utils/sanitizeError';
 import type { AppError, MediaMetadata } from '../types';
 
 function normalizeError(error: unknown, fallback: string): AppError {
-  const technicalDetails = error instanceof Error ? error.message : String(error);
+  const technicalDetails = sanitizeTechnicalError(error);
   return { userMessage: fallback, technicalDetails };
 }
 

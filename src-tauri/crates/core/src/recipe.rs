@@ -212,6 +212,7 @@ mod tests {
             explainable_result: None,
             verification: None,
             acquisition_plan,
+            acquisition_request: None,
         };
 
         let recipe = RecipeEngine::create_recipe(&job, None);

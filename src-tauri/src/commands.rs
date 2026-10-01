@@ -149,6 +149,19 @@ pub async fn get_active_job(state: State<'_, AppState>) -> Result<Option<Downloa
 }
 
 #[tauri::command]
+pub async fn get_download_history(state: State<'_, AppState>) -> Result<Vec<DownloadJob>, String> {
+    state.download_manager.list_jobs(200)
+}
+
+#[tauri::command]
+pub async fn retry_download(
+    job_id: String,
+    state: State<'_, AppState>,
+) -> Result<DownloadJob, String> {
+    state.download_manager.retry_job(&job_id).await
+}
+
+#[tauri::command]
 pub async fn get_tool_status(state: State<'_, AppState>) -> Result<Vec<ToolHealth>, String> {
     let settings = state.settings.get_settings();
     Ok(state

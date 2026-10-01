@@ -717,6 +717,8 @@ pub enum DownloadStatus {
     Idle,
     Analyzing,
     Ready,
+    Queued,
+    Preparing,
     Downloading,
     PostProcessing,
     Verifying,
@@ -724,6 +726,7 @@ pub enum DownloadStatus {
     Failed,
     Cancelling,
     Cancelled,
+    Interrupted,
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -959,6 +962,9 @@ pub struct DownloadJob {
     #[cfg_attr(test, ts(optional = nullable))]
     pub verification: Option<VerificationResult>,
     pub acquisition_plan: AcquisitionPlan,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub acquisition_request: Option<AcquisitionRequest>,
 }
 
 #[cfg_attr(test, derive(ts_rs::TS))]

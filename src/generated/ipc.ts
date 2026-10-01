@@ -91,7 +91,7 @@ export type MediaMetadata = { id: string, title: string, uploader?: string | nul
 
 export type ResolvedMediaSource = { sourceType: MediaSourceType, extractor?: string | null, extractorKey?: string | null, webpageUrl: string, title: string, mediaKind: MediaKind, capabilities: MediaCapabilities, candidates: Array<MediaFormatSpec>, strategy: DownloadStrategy, transcodingCost: TranscodingCost, transcodingExplanation: string, metadata?: MediaMetadata | null, errorDetail?: ResolverErrorDetail | null, isResolved: boolean, };
 
-export type DownloadStatus = "IDLE" | "ANALYZING" | "READY" | "DOWNLOADING" | "POST_PROCESSING" | "VERIFYING" | "COMPLETED" | "FAILED" | "CANCELLING" | "CANCELLED";
+export type DownloadStatus = "IDLE" | "ANALYZING" | "READY" | "QUEUED" | "PREPARING" | "DOWNLOADING" | "POST_PROCESSING" | "VERIFYING" | "COMPLETED" | "FAILED" | "CANCELLING" | "CANCELLED" | "INTERRUPTED";
 
 export type DownloadProgress = { percentage: number, downloadedBytes: number, totalBytes: number, speedBytesPerSec: number, etaSeconds?: number | null, currentSpeed: string, rawStatusLine: string, };
 
@@ -117,7 +117,7 @@ export type DownloadRecipe = { id: string, sourceUrl: string, resolverType: Medi
 
 export type ExplainableResult = { title: string, specsLabel: string, whyReasons: Array<string>, processingSummary: string, transcodingCost: TranscodingCost, verificationChecklist: VerificationChecklist, recipeId?: string | null, };
 
-export type DownloadJob = { id: string, url: string, outputDirectory: string, status: DownloadStatus, progress: DownloadProgress, metadata: MediaMetadata, finalFileName?: string | null, finalFilePath?: string | null, inspection?: MediaInspection | null, errorMessage?: string | null, createdAt: string, completedAt?: string | null, intent?: UserIntent | null, recipe?: DownloadRecipe | null, fingerprint?: MediaFingerprint | null, explainableResult?: ExplainableResult | null, verification?: VerificationResult | null, acquisitionPlan: AcquisitionPlan, };
+export type DownloadJob = { id: string, url: string, outputDirectory: string, status: DownloadStatus, progress: DownloadProgress, metadata: MediaMetadata, finalFileName?: string | null, finalFilePath?: string | null, inspection?: MediaInspection | null, errorMessage?: string | null, createdAt: string, completedAt?: string | null, intent?: UserIntent | null, recipe?: DownloadRecipe | null, fingerprint?: MediaFingerprint | null, explainableResult?: ExplainableResult | null, verification?: VerificationResult | null, acquisitionPlan: AcquisitionPlan, acquisitionRequest?: AcquisitionRequest | null, };
 
 export type AppSettings = { downloadDirectory: string, lastPreset: PresetType, defaultQuality: string, openFolderAfterDownload: boolean, autoAnalyzeOnPaste: boolean, embedMetadata: boolean, embedThumbnail: boolean, embedChapters: boolean, concurrentFragments: number, trimFilenames: number, sponsorBlockMode: SponsorBlockMode, subtitleMode: SubtitleMode, preferredSubtitleLanguage: string, customYtdlpPath?: string | null, customFfmpegPath?: string | null, customFfprobePath?: string | null, customMediainfoPath?: string | null, };
 

@@ -25,6 +25,8 @@ export const ipc = {
   cancelDownload: (jobId: string) =>
     invoke<DownloadJob>('cancel_download', { jobId }),
   getActiveJob: () => invoke<DownloadJob | null>('get_active_job'),
+  getDownloadHistory: () => invoke<DownloadJob[]>('get_download_history'),
+  retryDownload: (jobId: string) => invoke<DownloadJob>('retry_download', { jobId }),
   getToolStatus: () => invoke<ToolHealth[]>('get_tool_status'),
   getDetailedToolStatus: () => invoke<ToolStatusInfo[]>('get_detailed_tool_status'),
   installTool: (name: string) => invoke<ToolStatusInfo>('install_tool', { name }),

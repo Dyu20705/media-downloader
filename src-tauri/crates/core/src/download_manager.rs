@@ -8,6 +8,7 @@ use crate::diagnostics::DiagnosticsBuffer;
 use crate::execution::compile_acquisition_args;
 use crate::media_verifier::{resolve_final_download_path, verify_and_inspect_media};
 use crate::path_validator::validate_and_ensure_directory;
+use crate::persistence::JobStore;
 use crate::planner::AcquisitionPlanner;
 use crate::process_runner::ProcessHandle;
 use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
@@ -31,6 +32,7 @@ pub struct DownloadManager {
     active_job: Arc<RwLock<Option<DownloadJob>>>,
     active_handle: Arc<Mutex<Option<ActiveJobHandle>>>,
     admission_lock: Arc<Mutex<()>>,
+    job_store: Option<Arc<JobStore>>,
 }
 
 impl DownloadManager {
@@ -46,7 +48,62 @@ impl DownloadManager {
             active_job: Arc::new(RwLock::new(None)),
             active_handle: Arc::new(Mutex::new(None)),
             admission_lock: Arc::new(Mutex::new(())),
+            job_store: None,
         }
+    }
+
+    pub fn with_job_store(mut self, store: Arc<JobStore>) -> Self {
+        self.job_store = Some(store);
+        self
+    }
+
+    pub fn list_jobs(&self, limit: usize) -> Result<Vec<DownloadJob>, String> {
+        self.job_store
+            .as_ref()
+            .map_or(Ok(Vec::new()), |store| store.list(limit))
+    }
+
+    pub async fn retry_job(&self, job_id: &str) -> Result<DownloadJob, String> {
+        let store = self
+            .job_store
+            .as_ref()
+            .ok_or("Persistent history is unavailable")?;
+        let previous = store
+            .list(500)?
+            .into_iter()
+            .find(|job| job.id == job_id)
+            .ok_or("Download history entry was not found")?;
+        if !matches!(
+            previous.status,
+            DownloadStatus::Failed | DownloadStatus::Interrupted | DownloadStatus::Cancelled
+        ) {
+            return Err("Only failed, interrupted, or cancelled downloads can be retried".into());
+        }
+        let mut request = previous.acquisition_request.ok_or("This download cannot be retried safely. Paste the source URL and review the plan again.")?;
+        if previous.url == "[REDACTED]"
+            || (!previous.url.starts_with("https://") && !previous.url.starts_with("http://"))
+        {
+            return Err(
+                "The source URL was not saved for privacy. Paste it again and review the plan."
+                    .into(),
+            );
+        }
+        let mut metadata = previous.metadata;
+        metadata.webpage_url = previous.url;
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &metadata,
+            metadata.source_type.unwrap_or_default(),
+        );
+        let current_settings = self.settings.get_settings();
+        let plan =
+            AcquisitionPlanner::plan_with_policy(&graph, &request, (&current_settings).into())?;
+        request.output_directory = previous.output_directory;
+        self.start_download(StartDownloadRequest {
+            expected_plan_id: plan.id,
+            metadata,
+            acquisition: request,
+        })
+        .await
     }
 
     pub async fn get_active_job(&self) -> Option<DownloadJob> {
@@ -156,6 +213,7 @@ impl DownloadManager {
             recipe: None,
             fingerprint: None,
             explainable_result: None,
+            acquisition_request: Some(acquisition.clone()),
         };
 
         self.diagnostics.log(
@@ -188,6 +246,10 @@ impl DownloadManager {
                     self.diagnostics.log("ERROR", "PROCESS", e);
                 })?;
 
+        // Persist only sanitized data; raw input remains scoped to this process run.
+        if let Some(store) = &self.job_store {
+            store.save(&initial_job)?;
+        }
         // Publish the reserved slot only after the process was spawned successfully.
         *self.active_job.write().await = Some(initial_job.clone());
 
@@ -205,6 +267,7 @@ impl DownloadManager {
         let media_id = request.metadata.id.clone();
         let is_lossy_warning = compiled.is_lossy_conversion;
         let verification_settings = current_settings.clone();
+        let job_store = self.job_store.clone();
 
         tokio::spawn(async move {
             let mut state_machine = DownloadStateMachine::with_state(DownloadStatus::Downloading);
@@ -483,6 +546,11 @@ impl DownloadManager {
                 }
             }
 
+            if let (Some(store), Some(job)) = (job_store, active_job_clone.read().await.clone()) {
+                if let Err(error) = store.save(&job) {
+                    diagnostics_clone.log("ERROR", "PERSISTENCE", &error);
+                }
+            }
             *active_handle_clone.lock().await = None;
         });
 
@@ -665,6 +733,7 @@ mod tests {
             explainable_result: None,
             verification: None,
             acquisition_plan,
+            acquisition_request: None,
         }
     }
 

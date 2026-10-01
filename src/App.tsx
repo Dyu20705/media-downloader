@@ -98,6 +98,7 @@ export const App: React.FC = () => {
     isJobRunning,
     startDownload,
     cancelDownload,
+    retryDownload,
     resetActiveJob,
     downloadError,
   } = useDownloadEngine({ onDiagnosticsUpdate: fetchDiagnostics });
@@ -338,6 +339,7 @@ export const App: React.FC = () => {
         onClose={() => modals.setIsHistoryOpen(false)}
         jobs={allJobs}
         onInspect={handleOpenJobDetails}
+        onRetry={(job) => { void retryDownload(job.id); modals.setIsHistoryOpen(false); }}
       />
 
       <ToolsModal

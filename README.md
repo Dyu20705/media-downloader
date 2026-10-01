@@ -1,6 +1,6 @@
 # One-Click Media Downloader
 
-> Desktop media downloader in development powered by Tauri 2, Rust, React 18, yt-dlp, FFmpeg, and MediaInfo.
+> Desktop media downloader built with Tauri 2, Rust, React 18, yt-dlp, and FFmpeg. See [current validation and release limitations](CURRENT-STATE.md) before distribution.
 
 ---
 
@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
   - **Output Profile** independently chooses how output should behave: Best Source, Universal, Editing, or Small.
   - The backend-generated plan shows exact selected streams, output shape, processing, requirements, and warnings before download.
 - **Plan Verification**: The backend compares inspected codecs, container, dimensions, FPS and duration against the reviewed plan; mismatches are shown in the receipt.
-- **Runtime checks**: Subprocess execution without shell interpolation, URL/DNS preflight and bounded diagnostics. URL credentials and path/query/fragment values are removed from diagnostics. Playlist links default to one video; whole-playlist execution is not available yet. See [security boundaries](CURRENT-STATE.md#state-and-boundaries).
+- **Runtime checks**: Subprocess execution without shell interpolation, URL/DNS preflight and bounded diagnostics. URL credentials and path/query/fragment values are removed from diagnostics. Playlist links default to one video; whole-playlist execution is not available yet. See [security boundaries](CURRENT-STATE.md#security-and-diagnostics).
 
 ---
 
@@ -34,8 +34,8 @@ https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
 
 ### Prerequisites
 
-- Node.js 22 & npm
-- Current stable Rust toolchain
+- Node.js 24 & npm
+- Rust toolchain 1.96.0 (CI-pinned)
 
 ### Development
 
@@ -57,6 +57,8 @@ npm run tauri build
 ---
 
 ## Documentation
+
+- [Current implementation, recovery semantics, validation and release status](CURRENT-STATE.md)
 
 - [Current state, validation and limitations](CURRENT-STATE.md)
 

@@ -9,6 +9,7 @@ interface DownloadHistoryModalProps {
   onClose: () => void;
   jobs: DownloadJob[];
   onInspect: (job: DownloadJob) => void;
+  onRetry: (job: DownloadJob) => void;
 }
 
 export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
@@ -16,6 +17,7 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
   onClose,
   jobs,
   onInspect,
+  onRetry,
 }) => {
   if (!isOpen) return null;
 
@@ -75,7 +77,7 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                   <div className="flex items-center gap-2">
                     {job.status === 'COMPLETED' ? (
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" aria-hidden="true" />
-                    ) : job.status === 'FAILED' ? (
+                    ) : job.status === 'FAILED' || job.status === 'INTERRUPTED' ? (
                       <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" aria-hidden="true" />
                     ) : (
                       <Ban className="w-3.5 h-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
@@ -115,6 +117,16 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                         <FolderOpen className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     </>
+                  )}
+                  {['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(job.status) && (
+                    <button
+                      type="button"
+                      onClick={() => onRetry(job)}
+                      className="px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium focus-visible:ring-2 focus-visible:ring-blue-300"
+                      aria-label={`Retry ${job.metadata?.title || 'download'}`}
+                    >
+                      Retry
+                    </button>
                   )}
                   {job.inspection && (
                     <button

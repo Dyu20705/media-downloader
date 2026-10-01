@@ -26,7 +26,7 @@ The npm install-script allowlist is intentionally narrow: only `esbuild@0.25.12`
 - CodeQL analyzes Rust and TypeScript and publishes code-scanning results. Findings require human triage; this is not a PR merge gate.
 - `cargo-audit` checks both committed Rust lockfiles against the changing RustSec advisory database. A finding makes the scheduled run fail but does not automatically block unrelated PRs.
 
-The contract workflow targets the active `dev` integration branch as well as `main`; feature-branch pushes do not trigger a duplicate copy of the full contract suite.
+The contract workflow runs on direct pushes to `dev` and `main`, and pull requests targeting either branch; feature-branch pushes do not trigger a duplicate full suite.
 
 The PR npm audit is deliberately limited to installed production dependencies and high/critical severity. It uses the live npm advisory database, so a fresh advisory can change the result without a source change. Lower-severity and development-only findings remain visible through dependency update/review work rather than making this deterministic gate noisy.
 
@@ -75,6 +75,7 @@ Core tests require `ffmpeg`, `ffprobe`, and pinned `yt-dlp` `2025.2.19` on `PATH
 - The current tests do not package installers or exercise installed WebViews/OS permissions end-to-end. Signing, notarization, SBOM/provenance, and release artifact inspection require a separately defined release/signing policy.
 - External media tools run outside the process boundary. Tool download checksums and archive-path tests reduce install risk, but CI does not prove upstream tool publishers or the checksum catalog are uncompromised.
 - Process admission is limited to one active download and diagnostics retention is bounded. The subprocess output path currently uses unbounded line channels; limiting noisy/oversized child output remains a production reliability improvement not enforced by this gate.
-- No CI job proves crash recovery, durable jobs, UX accessibility, or large-scale performance.
+- The SQLite schema and recovery primitives are covered by deterministic core tests; live user-driven retry and restart behavior still need broader end-to-end coverage.
+- Linux CI builds the Debian package, inspects its bundled executable/desktop entry, and launches it under a virtual display. Windows/macOS installer launch smoke coverage and signed release validation remain outstanding.
 
 No cargo-deny license allowlist is added here: the dependency metadata includes multiple alternative and file-level license expressions, and a durable third-party redistribution policy should be explicitly maintained rather than inferred from a scanner default. The repository's application license and actual locked dependency license expressions were inspected for this decision.

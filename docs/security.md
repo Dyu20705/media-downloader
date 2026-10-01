@@ -56,3 +56,7 @@ Commands `open_folder` and `open_file` validate that the path:
 1. Is non-empty, contains no NUL bytes, and no control codes.
 2. Exists on the local filesystem.
 3. Invokes OS file managers directly (`explorer /select,<path>` on Windows, `open` on macOS, `xdg-open` on Linux) without passing through `cmd.exe` or shell interpreters.
+
+## Persisted history privacy
+
+Download job snapshots are serialized to SQLite only after recursive URL sanitization. URL usernames, passwords, fragments, and non-allowlisted query values are removed. Only public YouTube video/playlist/time identifiers are retained to support an explicit retry; source URLs requiring other query parameters are redacted, so retry asks the user to paste the source again. The database is stored in the per-user local application-data directory and is not encrypted by this application.

@@ -11,9 +11,9 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 └──────────────────────────────┬──────────────────────────────┘
                                │ Typed Tauri IPC
 ┌──────────────────────────────▼──────────────────────────────┐
-│                   Tauri 2 / Rust Core Core                  │
+│                 Tauri 2 / Rust Host + Core                 │
 │ ┌───────────────────────┐         ┌───────────────────────┐ │
-│ │  DownloadStateMachine │         │    ToolResolver &     │ │
+│ │  JobStore (SQLite)    │         │    ToolResolver &     │ │
 │ │ (Downloading, Verify) │         │     ToolManager       │ │
 │ └───────────┬───────────┘         └───────────┬───────────┘ │
 │             │                                 │             │
@@ -40,7 +40,8 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 - **`process_runner.rs`**: Async process spawning with stdout/stderr line streaming. On Windows, uses process tree termination (`taskkill /F /T /PID`) and process group isolation on Unix to ensure no orphaned child processes survive app exit or job cancellation.
 - **`state_machine.rs`**: Strict validated transitions:
   `IDLE → ANALYZING → READY → DOWNLOADING → POST_PROCESSING → VERIFYING → COMPLETED | FAILED | CANCELLED`.
-- **`download_manager.rs`**: Single-download concurrency lock, 4 Hz UI telemetry throttling, process tree lifecycle management, post-download verification.
+- **`download_manager.rs`**: Single-download admission lock, process lifecycle, explicit retry/replan, and post-download verification.
+- **`persistence.rs`**: Versioned SQLite schema, transactional job/attempt snapshots, privacy-filtered URL persistence, startup interrupted-state recovery.
 - **`planner.rs`**: Authoritative `SourceMediaGraph + AcquisitionRequest → AcquisitionPlan` resolution, including exact stream selection, planned output, processing class, estimates, warnings, and tool requirements.
 - **`media_verifier.rs`**: Verification using `ffprobe` / `MediaInfo` checking container headers, duration, stream count, and codec specs.
 - **`settings.rs`**: Atomic settings persistence with `.tmp` staging, `.bak` backup copy, corruption recovery, and schema verification.
@@ -63,3 +64,7 @@ One-Click Media Downloader is built with a dual-runtime desktop architecture com
 2. **Bounded Polling**: React polls the active job every 400 ms while work is active; Rust coalesces process progress updates to at most 4 Hz.
 3. **Bounded Telemetry**: Progress events are throttled to a maximum frequency of 4 Hz (250 ms), maintaining 60 FPS UI responsiveness.
 4. **No Media Bytes in Memory**: Stream media writes directly to disk; never buffers raw video/audio chunks in React or Rust memory buffers.
+
+## Durable state
+
+The Tauri host owns a SQLite `JobStore` opened from the per-user local application-data directory. Rust core receives the store through the download manager; React reads history through typed Tauri IPC. On startup, any nonterminal persisted job becomes `INTERRUPTED`, and no download is automatically resumed. Retries are explicit, use a new job ID, and recompute the plan under current settings. URL credentials, fragments, and unapproved query values are removed before serialization.

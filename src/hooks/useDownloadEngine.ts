@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ipc } from '../services/ipc';
+import { sanitizeTechnicalError } from '../utils/sanitizeError';
 import type { AppError, DownloadJob, StartDownloadRequest } from '../types';
 
-const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
+const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'INTERRUPTED']);
 
 function normalizeError(error: unknown, userMessage: string): AppError {
-  const technicalDetails = error instanceof Error ? error.message : String(error);
+  const technicalDetails = sanitizeTechnicalError(error);
   return { userMessage, technicalDetails };
 }
 
@@ -36,6 +37,9 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
   useEffect(() => {
     mounted.current = true;
     ipc.getActiveJob().then(acceptJob).catch(() => undefined);
+    ipc.getDownloadHistory().then((jobs) => {
+      if (mounted.current) setAllJobs(jobs);
+    }).catch(() => undefined);
     return () => {
       mounted.current = false;
     };
@@ -67,6 +71,15 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
     }
   }, [acceptJob, onDiagnosticsUpdate]);
 
+  const retryDownload = useCallback(async (jobId: string) => {
+    setDownloadError(null);
+    try {
+      acceptJob(await ipc.retryDownload(jobId));
+    } catch (error) {
+      setDownloadError(normalizeError(error, 'This download could not be retried. Review its history details and try again.'));
+    }
+  }, [acceptJob]);
+
   const cancelDownload = useCallback(async (jobId: string) => {
     try {
       acceptJob(await ipc.cancelDownload(jobId));
@@ -88,6 +101,7 @@ export function useDownloadEngine({ onDiagnosticsUpdate }: DownloadEngineOptions
     isJobRunning,
     startDownload,
     cancelDownload,
+    retryDownload,
     resetActiveJob,
     downloadError,
   };

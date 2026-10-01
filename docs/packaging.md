@@ -2,7 +2,7 @@
 
 ## 0. Release status and required evidence
 
-The repository is a development baseline, not a production or release candidate. The current branch has not produced or inspected a packaged desktop artifact. A release candidate still requires durable job/history storage and restart recovery, migration tests, install-and-launch smoke tests for each supported operating system, checksums for release artifacts, documented dependency/security review, signing/notarization policy, and beta validation. A successful frontend build or CI run alone does not satisfy those gates.
+The repository is not yet approved for production distribution. SQLite history and startup interruption recovery are implemented, but this repository does not yet verify install-and-launch behavior on every desktop platform or provide a signed release workflow. Treat unsigned local bundles as development artifacts.
 
 ## 1. Distribution Strategy
 
@@ -25,7 +25,8 @@ Configured in `src-tauri/tauri.conf.json`:
   - Identifier: `com.oneclick.media.downloader`
   - Publisher: `One-Click Media Downloader Team`
 - **Application Data Locations**:
-  - Settings: `%LOCALAPPDATA%\one-click-media-downloader\settings.json`
+  - Settings: application-specific configuration directory (see `settings.rs`).
+  - Download history: `%LOCALAPPDATA%\openDownloader\downloads.sqlite3` on Windows; the equivalent local application-data directory on macOS/Linux.
   - Managed Tools: `%LOCALAPPDATA%\OneClickMediaDownloader\tools\`
 
 ---
@@ -73,3 +74,7 @@ In GitHub Actions / Azure DevOps:
 2. Decode to secure runner temporary directory.
 3. Sign using `signtool` before publishing release artifacts.
 4. Immediately wipe certificate files from runner disk.
+
+## Signing and release gate
+
+No signing secrets belong in the repository. Before production distribution, configure platform signing credentials as protected CI secrets and require successful signing/notarization for the relevant release target. Unsigned bundles must not be labeled production-signed. Artifact checksums and release metadata should be generated from the exact published artifacts.

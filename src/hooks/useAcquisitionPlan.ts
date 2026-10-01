@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ipc } from '../services/ipc';
+import { sanitizeTechnicalError } from '../utils/sanitizeError';
 import type { AcquisitionPlan, AcquisitionRequest, AppError, MediaMetadata } from '../types';
 
 interface UseAcquisitionPlanResult {
@@ -42,7 +43,7 @@ export function useAcquisitionPlan(
       })
       .catch((error: unknown) => {
         if (currentRequest !== requestId.current) return;
-        const technicalDetails = error instanceof Error ? error.message : String(error);
+        const technicalDetails = sanitizeTechnicalError(error);
         setPlanningError({
           userMessage: 'A download plan could not be created for these choices.',
           technicalDetails,

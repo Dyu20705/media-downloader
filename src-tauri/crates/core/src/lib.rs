@@ -10,6 +10,7 @@ pub mod media_diff;
 pub mod media_graph;
 pub mod media_verifier;
 pub mod path_validator;
+pub mod persistence;
 pub mod plan_verifier;
 pub mod planner;
 pub mod process_runner;

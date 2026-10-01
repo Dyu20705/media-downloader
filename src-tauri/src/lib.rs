@@ -4,6 +4,7 @@ pub use ocmd_core as core;
 use commands::AppState;
 use core::diagnostics::DiagnosticsBuffer;
 use core::download_manager::DownloadManager;
+use core::persistence::JobStore;
 use core::settings::SettingsManager;
 use core::tools::ToolResolver;
 use std::sync::Arc;
@@ -13,11 +14,21 @@ pub fn run() {
     let tool_resolver = Arc::new(ToolResolver::new());
     let diagnostics = Arc::new(DiagnosticsBuffer::new());
     let settings = Arc::new(SettingsManager::new());
-    let download_manager = Arc::new(DownloadManager::new(
-        tool_resolver.clone(),
-        diagnostics.clone(),
-        settings.clone(),
-    ));
+    let database_path = dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("openDownloader")
+        .join("downloads.sqlite3");
+    let job_store = Arc::new(
+        JobStore::open(&database_path)
+            .unwrap_or_else(|error| panic!("Cannot open download history database: {error}")),
+    );
+    job_store
+        .recover_interrupted()
+        .unwrap_or_else(|error| panic!("Cannot recover download history: {error}"));
+    let download_manager = Arc::new(
+        DownloadManager::new(tool_resolver.clone(), diagnostics.clone(), settings.clone())
+            .with_job_store(job_store),
+    );
 
     let app_state = AppState {
         tool_resolver,
@@ -38,6 +49,8 @@ pub fn run() {
             commands::start_download,
             commands::cancel_download,
             commands::get_active_job,
+            commands::get_download_history,
+            commands::retry_download,
             commands::get_tool_status,
             commands::get_detailed_tool_status,
             commands::install_tool,
