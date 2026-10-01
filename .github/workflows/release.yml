@@ -113,12 +113,12 @@ jobs:
           set -eu
           mkdir -p release-artifacts
           case "${{ matrix.bundle }}" in
-            deb) cp src-tauri/target/release/bundle/deb/*.deb release-artifacts/ ;;
-            nsis) cp src-tauri/target/release/bundle/nsis/*-setup.exe release-artifacts/ ;;
-            dmg) cp src-tauri/target/release/bundle/dmg/*.dmg release-artifacts/ ;;
+            deb) cp -- src-tauri/target/release/bundle/deb/*.deb release-artifacts/ ;;
+            nsis) cp -- src-tauri/target/release/bundle/nsis/*-setup.exe release-artifacts/ ;;
+            dmg) cp -- src-tauri/target/release/bundle/dmg/*.dmg release-artifacts/ ;;
           esac
           cd release-artifacts
-          sha256sum * > SHA256SUMS
+          sha256sum -- ./* > SHA256SUMS
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: ${{ matrix.artifact }}
@@ -147,7 +147,7 @@ jobs:
           test -n "$(find release-assets -maxdepth 1 -name '*-setup.exe' -print -quit)"
           test -n "$(find release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
           cd release-assets
-          sha256sum *.deb *-setup.exe *.dmg > SHA256SUMS
+          sha256sum -- ./*.deb ./*-setup.exe ./*.dmg > SHA256SUMS
           printf '%s' "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
           printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --detach-sign --armor SHA256SUMS
           gpg --verify SHA256SUMS.asc SHA256SUMS
