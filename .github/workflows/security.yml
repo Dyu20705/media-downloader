@@ -2,7 +2,7 @@ name: Scheduled security analysis
 
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   schedule:
     - cron: '17 7 * * 1'
   workflow_dispatch:

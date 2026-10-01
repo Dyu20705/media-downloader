@@ -17,8 +17,20 @@ impl JobStore {
         if let Some(parent) = path.as_ref().parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Create database directory: {e}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                    .map_err(|e| format!("Protect database directory: {e}"))?;
+            }
         }
-        let connection = Connection::open(path).map_err(db_error)?;
+        let connection = Connection::open(path.as_ref()).map_err(db_error)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path.as_ref(), std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("Protect database file: {e}"))?;
+        }
         Self::initialize(connection)
     }
 
@@ -57,6 +69,13 @@ impl JobStore {
         let mut safe = serde_json::to_value(job).map_err(|e| format!("Serialize job: {e}"))?;
         sanitize_json(&mut safe);
         let payload = serde_json::to_string(&safe).map_err(|e| format!("Serialize job: {e}"))?;
+        let can_retry = safe
+            .get("url")
+            .and_then(|v| v.as_str())
+            .is_some_and(|url| url != "[REDACTED]")
+            && safe
+                .get("acquisitionRequest")
+                .is_some_and(|request| !request.is_null());
         let db = self
             .connection
             .lock()
@@ -70,7 +89,7 @@ impl JobStore {
                 |r| r.get(0),
             )
             .map_err(db_error)?;
-        tx.execute("INSERT INTO jobs(id,status,created_at,updated_at,can_retry,payload) VALUES(?1,?2,?3,?4,0,?5) ON CONFLICT(id) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at, payload=excluded.payload", params![job.id, format!("{:?}", job.status).to_uppercase(), job.created_at, now, payload]).map_err(db_error)?;
+        tx.execute("INSERT INTO jobs(id,status,created_at,updated_at,can_retry,payload) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at, can_retry=excluded.can_retry, payload=excluded.payload", params![job.id, format!("{:?}", job.status).to_uppercase(), job.created_at, now, can_retry, payload]).map_err(db_error)?;
         if !exists {
             tx.execute(
                 "INSERT INTO attempts(job_id,started_at) VALUES(?1,?2)",
@@ -225,6 +244,28 @@ mod tests {
             .unwrap();
         assert_eq!(table, "attempts");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn database_files_are_private_to_the_current_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("private").join("jobs.sqlite3");
+        let _store = JobStore::open(&database).unwrap();
+        assert_eq!(
+            std::fs::metadata(database.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(database).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
     #[test]
     fn url_persistence_strips_secrets_and_query_tokens() {
         let clean = safe_url("https://user:pass@example.com/watch?v=abc&token=secret#fragment");
