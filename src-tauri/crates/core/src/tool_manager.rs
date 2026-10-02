@@ -216,7 +216,7 @@ impl ToolManager {
         }
     }
 
-    #[cfg(all(debug_assertions, test))]
+    #[cfg(all(debug_assertions, test, unix))]
     fn new_with_roots(
         tools_base_dir: PathBuf,
         project_root: PathBuf,
