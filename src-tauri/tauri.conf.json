@@ -51,7 +51,7 @@
         ],
         "displayLanguageSelector": false
       },
-      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/sign-windows.ps1 %1"
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/sign-windows.ps1 -ArtifactPath \"%1\""
     }
   }
 }

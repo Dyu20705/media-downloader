@@ -40,13 +40,14 @@ One-Click Media Downloader manages required external helper tools in an isolated
 
 - **yt-dlp (`v2026.08.19`)**: Media stream extraction engine.
 - **FFmpeg & FFprobe (`v9.0.2`)**: Audio/video muxing, stream merging, post-processing, and format conversion.
-- **MediaInfo (`v24.12`)**: Container verification and stream inspection.
+- **MediaInfo (`v24.12`)**: Container verification and stream inspection. The required production refresh to 26.05 is still pending verified artifact hashes.
 
 ### Tool Resolution Order
 1. Custom path override in **Settings** (if configured).
-2. Project-local folder (`./bin/` or `./tools/`).
+2. Application-local managed directory (verified against the pinned archive checksum).
 3. System environment `PATH` (if already installed).
-4. Application-local managed directory (`%LOCALAPPDATA%\OneClickMediaDownloader\tools\`).
+
+Debug builds may also search project-relative `./`, `./bin/`, and `./tools/` locations. Release builds never search the process working directory or repository tree.
 
 ---
 

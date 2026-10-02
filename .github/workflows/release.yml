@@ -41,8 +41,63 @@ jobs:
           if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ['GITHUB_REF_NAME'] != f'v{package_version}': raise SystemExit('Release tag must exactly match the package SemVer.')
           if f'## {package_version}' not in Path('CHANGELOG.md').read_text(): raise SystemExit('Current version is missing from CHANGELOG.md')
           PY
-  package:
+  quality:
+    name: Release quality and security gates (${{ github.sha }})
     needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.96.0
+          components: rustfmt, clippy
+      - name: Install Tauri Linux build prerequisites
+        run: sudo apt-get update && sudo apt-get install --yes build-essential curl file libayatana-appindicator3-dev libgtk-3-dev libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev pkg-config
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Frontend boundary check
+        run: npm run check:ci
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: ESLint
+        run: npm run lint
+      - name: Vitest and release-note tests
+        run: npm test
+      - name: Verify generated IPC bindings
+        run: |
+          npm run bindings
+          git diff --exit-code -- src/generated/ipc.ts
+      - name: Build frontend production bundle
+        run: npm run build
+      - name: Rust formatting
+        run: |
+          cargo fmt --manifest-path src-tauri/crates/core/Cargo.toml --check
+          cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Test Rust core
+        run: cargo test --manifest-path src-tauri/crates/core/Cargo.toml --locked
+      - name: Test Tauri host
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Clippy core and host
+        run: |
+          cargo clippy --manifest-path src-tauri/crates/core/Cargo.toml --locked --all-targets -- -D warnings
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Audit locked Rust dependencies
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit --deny warnings --file src-tauri/crates/core/Cargo.lock
+          cargo audit --deny warnings --file src-tauri/Cargo.lock
+      - name: Audit shipped npm dependencies
+        run: npm audit --omit=dev --audit-level=high
+  package:
+    needs: [validate, quality]
     environment: production-release
     permissions:
       contents: read
@@ -129,6 +184,29 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+      - name: Verify Windows installer Authenticode signature
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $files = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe')
+          if ($files.Count -ne 1) { throw 'Expected exactly one NSIS setup executable.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $files[0].FullName
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "Installer signature status: $($signature.Status)." }
+          if ($signature.SignerCertificate.Thumbprint -ne ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '')) { throw 'Installer signer thumbprint mismatch.' }
+      - name: Verify macOS app signature and notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eu
+          apps=(src-tauri/target/release/bundle/macos/*.app)
+          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#apps[@]}" -eq 1
+          test "${#dmgs[@]}" -eq 1
+          codesign --verify --deep --strict --verbose=2 "${apps[0]}"
+          spctl --assess --type execute --verbose=4 "${apps[0]}"
+          xcrun stapler validate "${apps[0]}"
       - name: Select expected package and create uniquely named artifact
         shell: bash
         run: |

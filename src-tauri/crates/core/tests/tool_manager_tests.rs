@@ -273,9 +273,16 @@ async fn test_archive_derived_binary_tampering_is_rejected() {
     }
     manager.clear_cache();
 
+    let resolved = manager.resolve_tool("ffmpeg", None).await;
+    assert!(
+        resolved.as_ref().is_none_or(|tool| tool.path != installed),
+        "a checksum-mismatched managed executable must never be selected"
+    );
     let status = manager.check_tool_status("ffmpeg", None).await;
     assert_eq!(status.status, ToolStatus::Invalid);
-    assert!(status.error_message.unwrap().contains("checksum"));
+    assert!(status.managed);
+    let error = status.error_message.unwrap();
+    assert!(error.contains("damaged") || error.contains("checksum"));
 }
 
 #[cfg(unix)]

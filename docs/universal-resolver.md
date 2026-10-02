@@ -18,7 +18,7 @@ The **Universal Media Resolver** transforms One-Click Media Downloader from a si
 3. **No Unsolicited Speculative Scanning**: Resolution operations are lightweight, bounded by strict timeouts (15 seconds max), and execute zero heavy FFmpeg passes during metadata inspection.
 4. **Security & Ethical Integrity**:
    - Strictly reject non-HTTP/HTTPS schemes (e.g. `file://`, `gopher://`).
-   - Strictly reject private IP spoofing (e.g. `127.0.0.1`, `10.0.0.0/8`, `192.168.0.0/16`).
+   - Reject prohibited private/special-use addresses during URL preflight. In-process fallback HTTP validates and pins redirect destinations; yt-dlp may independently resolve and follow redirects, so this is not an end-to-end network boundary for delegated traffic.
    - Do NOT attempt to bypass DRM, login paywalls, CAPTCHAs, or token authorization systems. Clearly categorize these as `DRM_PROTECTED` or `REQUIRES_AUTHENTICATION`.
 
 ---

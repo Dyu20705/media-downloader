@@ -191,7 +191,10 @@ fn invalid_tool_status(
 #[derive(Debug)]
 pub struct ToolManager {
     tools_base_dir: PathBuf,
+    #[cfg(debug_assertions)]
     project_root: PathBuf,
+    #[cfg(debug_assertions)]
+    development_search: bool,
     diagnostics: Arc<DiagnosticsBuffer>,
     resolution_cache: Arc<RwLock<HashMap<String, ResolvedExecutable>>>,
 }
@@ -199,11 +202,31 @@ pub struct ToolManager {
 impl ToolManager {
     pub fn new(custom_tools_dir: Option<PathBuf>, diagnostics: Arc<DiagnosticsBuffer>) -> Self {
         let tools_base_dir = custom_tools_dir.unwrap_or_else(Self::resolve_default_tools_directory);
+        #[cfg(debug_assertions)]
         let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         Self {
             tools_base_dir,
+            #[cfg(debug_assertions)]
             project_root,
+            #[cfg(debug_assertions)]
+            development_search: true,
+            diagnostics,
+            resolution_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    #[cfg(all(debug_assertions, test))]
+    fn new_with_roots(
+        tools_base_dir: PathBuf,
+        project_root: PathBuf,
+        diagnostics: Arc<DiagnosticsBuffer>,
+        development_search: bool,
+    ) -> Self {
+        Self {
+            tools_base_dir,
+            project_root,
+            development_search,
             diagnostics,
             resolution_cache: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -375,12 +398,8 @@ impl ToolManager {
         }
     }
 
-    /// Resolution Hierarchy:
-    /// 1. Explicit configured path
-    /// 2. Project-local development tool (e.g. ./bin, ./tools)
-    /// 3. Bounded repository search (depth <= 3)
-    /// 4. System PATH
-    /// 5. Application-local managed tool
+    /// Resolution order: explicit user path, verified managed tool, then system PATH.
+    /// CWD/repository discovery is available only in debug builds.
     pub async fn resolve_tool(
         &self,
         tool_name: &str,
@@ -417,7 +436,19 @@ impl ToolManager {
         // Check lifetime resolution cache
         if let Ok(cache) = self.resolution_cache.read() {
             if let Some(tool) = cache.get(tool_name) {
-                if tool.path.exists() {
+                let valid_managed = if tool.is_managed {
+                    self.load_manifest()
+                        .tools
+                        .get(tool_name)
+                        .is_some_and(|entry| {
+                            entry.verified
+                                && entry.path == tool.path.to_string_lossy()
+                                && Self::verify_sha256(&tool.path, &entry.sha256).unwrap_or(false)
+                        })
+                } else {
+                    true
+                };
+                if tool.path.exists() && valid_managed {
                     return Some(ResolvedExecutable {
                         name: tool.name.clone(),
                         path: tool.path.clone(),
@@ -438,35 +469,18 @@ impl ToolManager {
             vec![tool_name.to_string()]
         };
 
-        // Priority 2: Project-local development tool (./bin, ./tools)
-        for exe in &exe_names {
-            let paths = [
-                self.project_root.join(exe),
-                self.project_root.join("bin").join(exe),
-                self.project_root.join("tools").join(exe),
-            ];
-            for path in paths {
-                if path.exists() {
-                    if let Ok(version) = Self::validate_executable(tool_name, &path).await {
-                        let res = ResolvedExecutable {
-                            name: tool_name.to_string(),
-                            path,
-                            version: Some(version),
-                            is_managed: false,
-                        };
-                        self.cache_resolution(tool_name, &res);
-                        return Some(res);
-                    }
-                }
-            }
-        }
-
-        // Priority 3: Application-local managed tool in tools/<tool>/<version>/
+        // Verified application-local managed tool in tools/<tool>/<version>/
         if let Some(spec) = get_pinned_tool_spec(tool_name) {
             let version_dir = self.get_version_dir(tool_name, spec.pinned_version);
+            let manifest = self.load_manifest();
             for exe in &exe_names {
                 let managed_path = version_dir.join(exe);
-                if managed_path.exists() {
+                let verified_entry = manifest.tools.get(tool_name).is_some_and(|entry| {
+                    entry.verified
+                        && entry.path == managed_path.to_string_lossy()
+                        && Self::verify_sha256(&managed_path, &entry.sha256).unwrap_or(false)
+                });
+                if managed_path.exists() && verified_entry {
                     if let Ok(version) = Self::validate_executable(tool_name, &managed_path).await {
                         let res = ResolvedExecutable {
                             name: tool_name.to_string(),
@@ -481,31 +495,13 @@ impl ToolManager {
             }
         }
 
-        // Priority 4: Bounded repository search (depth <= 3, e.g. youtube-downloader/)
-        let mut candidates = Vec::new();
-        let yt_dir = self.project_root.join("youtube-downloader");
-        if yt_dir.exists() && yt_dir.is_dir() {
-            Self::find_files_bounded(&yt_dir, &exe_names, 3, &mut candidates);
-            for path in candidates {
-                if path.exists() {
-                    if let Ok(version) = Self::validate_executable(tool_name, &path).await {
-                        let res = ResolvedExecutable {
-                            name: tool_name.to_string(),
-                            path,
-                            version: Some(version),
-                            is_managed: false,
-                        };
-                        self.cache_resolution(tool_name, &res);
-                        return Some(res);
-                    }
-                }
-            }
-        }
-
-        // Priority 5: System PATH (fallback when managed tool is not installed)
+        // System PATH is an intentional product fallback.
         if let Ok(path_var) = std::env::var("PATH") {
             let split_char = if cfg!(windows) { ';' } else { ':' };
             for dir in path_var.split(split_char) {
+                if dir.is_empty() || (!self.development_search && !Path::new(dir).is_absolute()) {
+                    continue;
+                }
                 let dir_path = Path::new(dir);
                 for exe in &exe_names {
                     let full = dir_path.join(exe);
@@ -521,6 +517,44 @@ impl ToolManager {
                             return Some(res);
                         }
                     }
+                }
+            }
+        }
+
+        // Repository-relative discovery is compiled into debug builds only.
+        #[cfg(debug_assertions)]
+        if self.development_search {
+            for exe in &exe_names {
+                for path in [
+                    self.project_root.join(exe),
+                    self.project_root.join("bin").join(exe),
+                    self.project_root.join("tools").join(exe),
+                ] {
+                    if path.exists() {
+                        if let Ok(version) = Self::validate_executable(tool_name, &path).await {
+                            return Some(ResolvedExecutable {
+                                name: tool_name.to_string(),
+                                path,
+                                version: Some(version),
+                                is_managed: false,
+                            });
+                        }
+                    }
+                }
+            }
+            let mut candidates = Vec::new();
+            let yt_dir = self.project_root.join("youtube-downloader");
+            if yt_dir.is_dir() {
+                Self::find_files_bounded(&yt_dir, &exe_names, 3, &mut candidates);
+            }
+            for path in candidates {
+                if let Ok(version) = Self::validate_executable(tool_name, &path).await {
+                    return Some(ResolvedExecutable {
+                        name: tool_name.to_string(),
+                        path,
+                        version: Some(version),
+                        is_managed: false,
+                    });
                 }
             }
         }
@@ -1237,6 +1271,38 @@ mod version_tests {
         assert!(!is_date_version_older("2026.08.19", "2026.08.19"));
         assert!(!is_date_version_older("stable 2026.09.02", "2026.08.19"));
         assert!(!is_date_version_older("unknown", "2026.08.19"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn production_resolution_never_selects_cwd_binaries() {
+        use std::os::unix::fs::PermissionsExt;
+        let cwd = tempfile::tempdir().unwrap();
+        let tools = tempfile::tempdir().unwrap();
+        let marker = cwd.path().join("executed");
+        for name in ["yt-dlp", "ffmpeg", "ffprobe", "mediainfo"] {
+            let binary = cwd.path().join(name);
+            fs::write(
+                &binary,
+                format!("#!/bin/sh\ntouch '{}'\necho fake\n", marker.display()),
+            )
+            .unwrap();
+            let mut permissions = fs::metadata(&binary).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&binary, permissions).unwrap();
+        }
+        let manager = ToolManager::new_with_roots(
+            tools.path().to_path_buf(),
+            cwd.path().to_path_buf(),
+            Arc::new(DiagnosticsBuffer::new()),
+            false,
+        );
+        for name in ["yt-dlp", "ffmpeg", "ffprobe", "mediainfo"] {
+            if let Some(tool) = manager.resolve_tool(name, None).await {
+                assert!(!tool.path.starts_with(cwd.path()), "selected CWD {name}");
+            }
+        }
+        assert!(!marker.exists(), "untrusted CWD executable was invoked");
     }
 }
 

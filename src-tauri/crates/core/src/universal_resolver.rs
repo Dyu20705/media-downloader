@@ -478,23 +478,15 @@ impl UniversalResolver {
 
     /// Direct fallback parser for TikTok when yt-dlp extractor is challenged or blocked
     async fn extract_tiktok_direct(&self, url: &str) -> Result<MediaMetadata, String> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
-            .build()
-            .map_err(|e| format!("Failed to initialize HTTP client: {}", e))?;
-
-        let resp = client
-            .get(url)
-            .header(
-                "Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .header("Referer", "https://www.tiktok.com/")
-            .send()
-            .await
-            .map_err(|e| format!("Failed to reach TikTok: {}", e))?;
+        let resp = crate::url_validator::get_public_url(
+            url,
+            &[
+                ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+                ("Accept-Language", "en-US,en;q=0.9"),
+                ("Referer", "https://www.tiktok.com/"),
+                ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"),
+            ],
+        ).await.map_err(|e| format!("Failed to reach TikTok safely: {e}"))?;
 
         let html = resp
             .text()

@@ -9,7 +9,7 @@
     "check:ci": "node scripts/ci/check-boundaries.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
-    "test": "vitest run",
+    "test": "vitest run && node scripts/release/extract-notes-check.mjs",
     "bindings": "UPDATE_BINDINGS=1 cargo test --manifest-path src-tauri/crates/core/Cargo.toml ipc_bindings_are_current"
   },
   "dependencies": {

@@ -59,3 +59,13 @@ Commands `open_folder` and `open_file` validate that the path:
 ## Persisted history privacy
 
 Download job snapshots are serialized to SQLite only after recursive URL sanitization. URL usernames, passwords, fragments, and non-allowlisted query values are removed. Only public YouTube video/playlist/time identifiers are retained to support an explicit retry; source URLs requiring other query parameters are redacted, so retry asks the user to paste the source again. The database is stored in the per-user local application-data directory and is not encrypted by this application.
+
+## Executable trust and network boundary
+
+Release builds resolve tools from an explicitly configured executable path, the application-local managed tool directory, or system `PATH`. Managed downloads are checked against the catalog SHA-256 before archive extraction and installation; extraction selects only the declared executable. Debug builds retain project-relative discovery for development. Release builds do not search the process working directory or repository tree. Explicit custom paths are executable code selected by the user and are validated by running the tool's version command.
+
+URL parsing rejects non-HTTP(S) schemes, localhost names, private, loopback, link-local, unspecified, multicast, and listed special-use IP ranges. Before external-tool delegation, the app resolves the supplied host and rejects it if any returned address is prohibited. For the in-process TikTok fallback, every redirect destination is parsed and DNS-validated, and its validated addresses are pinned in the HTTP client for the connection.
+
+The preflight check cannot constrain yt-dlp's later independent DNS resolution, redirects, or connections. Therefore private-network protection is not end-to-end for traffic delegated to yt-dlp. A network sandbox or proxy enforcing destination policy for child processes would be needed to provide that guarantee.
+
+Windows release signing uses the protected `WINDOWS_CERTIFICATE` and password to import the certificate, selects it by the configured thumbprint, applies SHA-256 Authenticode signing with the repository's RFC3161 timestamp endpoint, and verifies both SignTool policy and the resulting Authenticode signer identity. No signing material is stored in the repository.
