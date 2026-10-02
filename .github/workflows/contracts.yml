@@ -247,11 +247,18 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          apps=(src-tauri/target/release/bundle/macos/*.app)
           dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
-          test "${#apps[@]}" -eq 1
           test "${#dmgs[@]}" -eq 1
           hdiutil verify "${dmgs[0]}"
+          mount_dir="$RUNNER_TEMP/opendownloader-dmg-smoke"
+          mkdir -p "$mount_dir"
+          device="$(hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmgs[0]}" | awk 'NR == 1 { print $1 }')"
+          cleanup() {
+            hdiutil detach "$device" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          test -d "$mount_dir/openDownloader.app"
+          test -x "$mount_dir/openDownloader.app/Contents/MacOS/opendownloader"
 
   workflow-security:
     name: Workflow and secret checks

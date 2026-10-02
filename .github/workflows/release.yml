@@ -288,19 +288,28 @@ jobs:
               throw "$($file.Name) signer thumbprint mismatch."
             }
           }
-      - name: Verify macOS app signature and notarization
+      - name: Verify macOS DMG, app signature, Gatekeeper, and notarization
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
-          apps=(src-tauri/target/release/bundle/macos/*.app)
+          shopt -s nullglob
           dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
-          test "${#apps[@]}" -eq 1
           test "${#dmgs[@]}" -eq 1
-          codesign --verify --deep --strict --verbose=2 "${apps[0]}"
-          spctl --assess --type execute --verbose=4 "${apps[0]}"
-          xcrun stapler validate "${apps[0]}"
+          hdiutil verify "${dmgs[0]}"
           xcrun stapler validate "${dmgs[0]}"
+          mount_dir="$RUNNER_TEMP/opendownloader-release-dmg"
+          mkdir -p "$mount_dir"
+          device="$(hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmgs[0]}" | awk 'NR == 1 { print $1 }')"
+          cleanup() {
+            hdiutil detach "$device" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          app="$mount_dir/openDownloader.app"
+          test -d "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
       - name: Select expected package and create uniquely named artifact
         shell: bash
         run: |
