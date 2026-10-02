@@ -218,7 +218,7 @@ jobs:
           esac
           test "${#files[@]}" -eq 1
           cp -- "${files[0]}" "release-artifacts/${{ matrix.platform }}__$(basename "${files[0]}")"
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: release-artifacts/*
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
