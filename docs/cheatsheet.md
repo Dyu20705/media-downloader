@@ -40,7 +40,7 @@ openDownloader manages required external helper tools in an isolated, applicatio
 
 - **yt-dlp (`v2026.08.19`)**: Media stream extraction engine.
 - **FFmpeg & FFprobe (`v9.0.2`)**: Audio/video muxing, stream merging, post-processing, and format conversion.
-- **MediaInfo (`v24.12`)**: Container verification and stream inspection. The required production refresh to 26.05 is still pending verified artifact hashes.
+- **MediaInfo (`v26.05`)**: Optional container verification and stream inspection. Managed installation supports Windows x86_64; Linux and macOS require a system or custom executable.
 
 ### Tool Resolution Order
 1. Custom path override in **Settings** (if configured).

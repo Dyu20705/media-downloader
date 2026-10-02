@@ -26,7 +26,7 @@ fn test_pinned_versions_catalog() {
     assert!(ffprobe.is_required);
 
     let mediainfo = get_pinned_tool_spec("mediainfo").expect("mediainfo must be pinned");
-    assert_eq!(mediainfo.pinned_version, "24.12");
+    assert_eq!(mediainfo.pinned_version, "26.05");
     assert!(!mediainfo.is_required);
     assert_eq!(mediainfo.license, "BSD-2-Clause");
 }

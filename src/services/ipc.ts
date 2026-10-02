@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type {
   AppSettings,
@@ -15,7 +15,7 @@ import type {
 } from '../types';
 
 function ensureTauriRuntime(): void {
-  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+  if (!isTauri()) {
     throw new Error(
       'The desktop app bridge is unavailable. Open openDownloader from the installed desktop app and try again.',
     );

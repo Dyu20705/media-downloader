@@ -106,11 +106,10 @@ pub static PINNED_TOOLS: &[PinnedToolSpec] = &[
     },
     PinnedToolSpec {
         name: "mediainfo",
-        pinned_version: "24.12",
+        pinned_version: "26.05",
         executable_names: if cfg!(windows) { &["mediainfo.exe", "MediaInfo.exe", "mediainfo"] } else { &["mediainfo"] },
         artifacts: &[
-            ToolArtifact { os: "windows", arch: "x86_64", url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Windows_x64.zip", sha256: "f9570aa61fdb930e46124564c7ee23696f4244db919b33a595a882a9341496a7", packaging: Packaging::Zip, executable_path: "MediaInfo.exe" },
-            ToolArtifact { os: "macos", arch: "x86_64", url: "https://mediaarea.net/download/binary/mediainfo/24.12/MediaInfo_CLI_24.12_Mac.tar.bz2", sha256: "ea8402db3b72c91838f5fbc7d9f7ad9cbb7a1df58ff7fe2ee398dbd71d3eb847", packaging: Packaging::TarBz2, executable_path: "mediainfo" },
+            ToolArtifact { os: "windows", arch: "x86_64", url: "https://mediaarea.net/download/binary/mediainfo/26.05/MediaInfo_CLI_26.05_Windows_x64.zip", sha256: "f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9", packaging: Packaging::Zip, executable_path: "MediaInfo.exe" },
         ],
         license: "BSD-2-Clause",
         license_url: "https://mediaarea.net/en/MediaInfo/License",
@@ -216,17 +215,19 @@ impl ToolManager {
         }
     }
 
-    #[cfg(all(debug_assertions, test, unix))]
+    #[cfg(all(test, unix))]
     fn new_with_roots(
         tools_base_dir: PathBuf,
-        project_root: PathBuf,
+        _project_root: PathBuf,
         diagnostics: Arc<DiagnosticsBuffer>,
-        development_search: bool,
+        _development_search: bool,
     ) -> Self {
         Self {
             tools_base_dir,
-            project_root,
-            development_search,
+            #[cfg(debug_assertions)]
+            project_root: _project_root,
+            #[cfg(debug_assertions)]
+            development_search: _development_search,
             diagnostics,
             resolution_cache: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -587,6 +588,7 @@ impl ToolManager {
         }
     }
 
+    #[cfg(debug_assertions)]
     fn find_files_bounded(dir: &Path, exe_names: &[String], depth: usize, out: &mut Vec<PathBuf>) {
         if depth == 0 {
             return;
@@ -1513,6 +1515,61 @@ mod archive_tests {
                 .unwrap_err()
                 .contains("7z")
         );
+    }
+
+    #[tokio::test]
+    async fn mediainfo_pin_and_archive_layout_fail_closed() {
+        let spec = get_pinned_tool_spec("mediainfo").unwrap();
+        assert_eq!(spec.pinned_version, "26.05");
+        let artifact = artifact_for(spec, "windows", "x86_64").unwrap();
+        assert_eq!(artifact.executable_path, "MediaInfo.exe");
+        assert_eq!(artifact.packaging, Packaging::Zip);
+        assert_eq!(artifact.url, "https://mediaarea.net/download/binary/mediainfo/26.05/MediaInfo_CLI_26.05_Windows_x64.zip");
+        assert_eq!(
+            artifact.sha256,
+            "f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9"
+        );
+        assert!(artifact_for(spec, "macos", "x86_64").is_err());
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("mediainfo.zip");
+        let output = temp.path().join("selected");
+        for (members, accepted) in [
+            (
+                vec!["MediaInfo.exe", "LICENSE", "Plugin/Custom/Example.csv"],
+                true,
+            ),
+            (vec!["MediaInfo_GUI.exe"], false),
+            (vec!["../MediaInfo.exe"], false),
+            (vec!["a/MediaInfo.exe", "b/MediaInfo.exe"], false),
+        ] {
+            let mut zip = zip::ZipWriter::new(File::create(&archive).unwrap());
+            for member in members {
+                zip.start_file(member, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(member.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+            let result = extract_binary(
+                &archive,
+                &output,
+                artifact.packaging,
+                artifact.executable_path,
+            )
+            .await;
+            assert_eq!(result.is_ok(), accepted);
+            if accepted {
+                assert_eq!(fs::read(&output).unwrap(), b"MediaInfo.exe");
+            }
+        }
+        fs::write(&archive, b"corrupt ZIP").unwrap();
+        assert!(extract_binary(
+            &archive,
+            &output,
+            artifact.packaging,
+            artifact.executable_path
+        )
+        .await
+        .is_err());
     }
 
     #[test]
