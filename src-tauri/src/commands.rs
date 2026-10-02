@@ -3,13 +3,15 @@ use tauri::State;
 
 use crate::core::diagnostics::DiagnosticsBuffer;
 use crate::core::download_manager::DownloadManager;
-use crate::core::presets::compile_download_args;
+use crate::core::execution::compile_acquisition_args;
+use crate::core::media_graph::MediaGraph;
+use crate::core::planner::AcquisitionPlanner;
 use crate::core::settings::SettingsManager;
 use crate::core::tools::ToolResolver;
 use crate::core::types::{
-    AppSettings, BuildCommandRequest, BuildCommandResponse, DiagnosticLog, DownloadJob,
-    MediaMetadata, ResolvedMediaSource, StartDownloadRequest, ToolHealth, ToolStatusInfo,
-    ToolsManifest,
+    AcquisitionPlan, AcquisitionRequest, AppSettings, BuildCommandRequest, BuildCommandResponse,
+    DiagnosticLog, DownloadJob, MediaMetadata, ResolvedMediaSource, StartDownloadRequest,
+    ToolHealth, ToolStatusInfo, ToolsManifest,
 };
 use crate::core::universal_resolver::UniversalResolver;
 
@@ -25,8 +27,13 @@ pub async fn resolve_media(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<ResolvedMediaSource, String> {
-    state.diagnostics.log("INFO", "RESOLVER", &format!("Universal resolving URL: {}", url));
-    let resolver = UniversalResolver::new(Arc::clone(&state.tool_resolver));
+    state
+        .diagnostics
+        .log("INFO", "RESOLVER", "Resolving user-provided media URL");
+    let resolver = UniversalResolver::with_settings(
+        Arc::clone(&state.tool_resolver),
+        state.settings.get_settings(),
+    );
     let result = resolver.resolve(&url).await?;
     state.diagnostics.log(
         "INFO",
@@ -44,8 +51,13 @@ pub async fn analyze_media(
     url: String,
     state: State<'_, AppState>,
 ) -> Result<MediaMetadata, String> {
-    state.diagnostics.log("INFO", "IPC", &format!("Analyzing URL: {}", url));
-    let resolver = UniversalResolver::new(Arc::clone(&state.tool_resolver));
+    state
+        .diagnostics
+        .log("INFO", "IPC", "Analyzing user-provided media URL");
+    let resolver = UniversalResolver::with_settings(
+        Arc::clone(&state.tool_resolver),
+        state.settings.get_settings(),
+    );
     let resolved = resolver.resolve(&url).await?;
     if let Some(metadata) = resolved.metadata {
         Ok(metadata)
@@ -57,6 +69,20 @@ pub async fn analyze_media(
 }
 
 #[tauri::command]
+pub async fn plan_acquisition(
+    metadata: MediaMetadata,
+    acquisition: AcquisitionRequest,
+    state: State<'_, AppState>,
+) -> Result<AcquisitionPlan, String> {
+    let graph = MediaGraph::build_source_graph(&metadata, metadata.source_type.unwrap_or_default());
+    AcquisitionPlanner::plan_with_policy(
+        &graph,
+        &acquisition,
+        (&state.settings.get_settings()).into(),
+    )
+}
+
+#[tauri::command]
 pub async fn build_command(
     request: BuildCommandRequest,
     state: State<'_, AppState>,
@@ -65,15 +91,35 @@ pub async fn build_command(
         .settings
         .unwrap_or_else(|| state.settings.get_settings());
 
-    let compiled = compile_download_args(
-        request.preset,
-        &request.quality,
-        &request.output_directory,
-        &request.url,
-        &settings,
+    let graph = MediaGraph::build_source_graph(
+        &request.metadata,
+        request.metadata.source_type.unwrap_or_default(),
     );
+    let plan =
+        AcquisitionPlanner::plan_with_policy(&graph, &request.acquisition, (&settings).into())?;
+    let compiled = compile_acquisition_args(
+        &plan,
+        &crate::core::execution::ExecutionContext::new(
+            &request.acquisition.output_directory,
+            &settings,
+        ),
+    )?;
 
-    let full_display = format!("yt-dlp {}", compiled.arguments.join(" "));
+    // Argument vectors are displayed as JSON, not as a shell command.
+    let mut full_display = format!(
+        "yt-dlp {}",
+        serde_json::to_string_pretty(&compiled.arguments).map_err(|e| e.to_string())?
+    );
+    if let Some(transform) = &compiled.finalize {
+        let arguments = transform.arguments(
+            std::path::Path::new("<downloaded-file>"),
+            std::path::Path::new(&format!("<verified-output>.{}", transform.container)),
+        );
+        full_display.push_str(&format!(
+            "\n\nffmpeg {}",
+            serde_json::to_string_pretty(&arguments).map_err(|e| e.to_string())?
+        ));
+    }
 
     Ok(BuildCommandResponse {
         command: full_display,
@@ -98,17 +144,30 @@ pub async fn cancel_download(
 }
 
 #[tauri::command]
-pub async fn get_active_job(
-    state: State<'_, AppState>,
-) -> Result<Option<DownloadJob>, String> {
+pub async fn get_active_job(state: State<'_, AppState>) -> Result<Option<DownloadJob>, String> {
     Ok(state.download_manager.get_active_job().await)
 }
 
 #[tauri::command]
-pub async fn get_tool_status(
+pub async fn get_download_history(state: State<'_, AppState>) -> Result<Vec<DownloadJob>, String> {
+    state.download_manager.list_jobs(200)
+}
+
+#[tauri::command]
+pub async fn retry_download(
+    job_id: String,
     state: State<'_, AppState>,
-) -> Result<Vec<ToolHealth>, String> {
-    Ok(state.tool_resolver.get_all_tools_health().await)
+) -> Result<DownloadJob, String> {
+    state.download_manager.retry_job(&job_id).await
+}
+
+#[tauri::command]
+pub async fn get_tool_status(state: State<'_, AppState>) -> Result<Vec<ToolHealth>, String> {
+    let settings = state.settings.get_settings();
+    Ok(state
+        .tool_resolver
+        .get_all_tools_health_with_settings(Some(&settings))
+        .await)
 }
 
 #[tauri::command]
@@ -116,7 +175,10 @@ pub async fn get_detailed_tool_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<ToolStatusInfo>, String> {
     let settings = state.settings.get_settings();
-    Ok(state.tool_resolver.get_all_tool_statuses(Some(&settings)).await)
+    Ok(state
+        .tool_resolver
+        .get_all_tool_statuses(Some(&settings))
+        .await)
 }
 
 #[tauri::command]
@@ -146,21 +208,21 @@ pub async fn install_all_missing_tools(
 pub async fn auto_bootstrap_tools(
     state: State<'_, AppState>,
 ) -> Result<Vec<ToolStatusInfo>, String> {
-    state.diagnostics.log("INFO", "TOOL_MANAGER", "Running automated engine tools bootstrap");
+    state.diagnostics.log(
+        "INFO",
+        "TOOL_MANAGER",
+        "Running automated engine tools bootstrap",
+    );
     state.tool_resolver.auto_bootstrap_required_tools().await
 }
 
 #[tauri::command]
-pub async fn get_tools_manifest(
-    state: State<'_, AppState>,
-) -> Result<ToolsManifest, String> {
+pub async fn get_tools_manifest(state: State<'_, AppState>) -> Result<ToolsManifest, String> {
     Ok(state.tool_resolver.manager().load_manifest())
 }
 
 #[tauri::command]
-pub async fn get_settings(
-    state: State<'_, AppState>,
-) -> Result<AppSettings, String> {
+pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
     Ok(state.settings.get_settings())
 }
 
@@ -169,20 +231,18 @@ pub async fn save_settings(
     settings: AppSettings,
     state: State<'_, AppState>,
 ) -> Result<AppSettings, String> {
-    state.settings.save_settings(settings)
+    let saved = state.settings.save_settings(settings)?;
+    state.tool_resolver.clear_cache();
+    Ok(saved)
 }
 
 #[tauri::command]
-pub async fn get_diagnostics(
-    state: State<'_, AppState>,
-) -> Result<Vec<DiagnosticLog>, String> {
+pub async fn get_diagnostics(state: State<'_, AppState>) -> Result<Vec<DiagnosticLog>, String> {
     Ok(state.diagnostics.get_logs())
 }
 
 #[tauri::command]
-pub async fn clear_diagnostics(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn clear_diagnostics(state: State<'_, AppState>) -> Result<(), String> {
     state.diagnostics.clear();
     Ok(())
 }

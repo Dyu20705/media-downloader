@@ -46,3 +46,38 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(113, 113, 122, 0.9);
 }
+
+:root {
+  color-scheme: dark;
+  --surface-app: #09090b;
+  --surface-raised: #18181b;
+  --surface-overlay: #27272a;
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --border-subtle: #27272a;
+  --accent-primary: #3b82f6;
+  --status-success: #34d399;
+  --status-warning: #fbbf24;
+  --status-danger: #f87171;
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+  --shadow-overlay: 0 24px 64px rgb(0 0 0 / 0.45);
+}
+
+body {
+  min-width: 360px;
+  min-height: 100vh;
+  background: var(--surface-app);
+  color: var(--text-primary);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:disabled {
+  cursor: not-allowed;
+}

@@ -1,11 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimal restricted capabilities for One-Click Media Downloader frontend",
+  "description": "Minimal restricted capabilities for openDownloader frontend",
   "windows": ["*"],
   "permissions": [
     "core:default",
-    "opener:default",
-    "dialog:default"
+    "dialog:allow-open"
   ]
 }

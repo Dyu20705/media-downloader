@@ -1,7 +1,7 @@
+use crate::types::DiagnosticLog;
+use chrono::Local;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
-use chrono::Local;
-use crate::types::DiagnosticLog;
 
 const MAX_LOG_LINES: usize = 256;
 const MAX_TOTAL_BYTES: usize = 64 * 1024; // <= 64 KiB retained text
@@ -10,6 +10,12 @@ const MAX_TOTAL_BYTES: usize = 64 * 1024; // <= 64 KiB retained text
 pub struct DiagnosticsBuffer {
     logs: Arc<RwLock<VecDeque<DiagnosticLog>>>,
     retained_bytes: Arc<RwLock<usize>>,
+}
+
+impl Default for DiagnosticsBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DiagnosticsBuffer {
@@ -33,11 +39,13 @@ impl DiagnosticsBuffer {
             message: sanitized,
         };
 
-        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write()) {
+        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write())
+        {
             // Trim by line count
             while lock.len() >= MAX_LOG_LINES {
                 if let Some(removed) = lock.pop_front() {
-                    let removed_len = removed.message.len() + removed.level.len() + removed.source.len() + 32;
+                    let removed_len =
+                        removed.message.len() + removed.level.len() + removed.source.len() + 32;
                     *bytes_lock = bytes_lock.saturating_sub(removed_len);
                 }
             }
@@ -45,7 +53,8 @@ impl DiagnosticsBuffer {
             // Trim by total retained memory bytes (<= 64 KiB)
             while *bytes_lock + msg_len > MAX_TOTAL_BYTES && !lock.is_empty() {
                 if let Some(removed) = lock.pop_front() {
-                    let removed_len = removed.message.len() + removed.level.len() + removed.source.len() + 32;
+                    let removed_len =
+                        removed.message.len() + removed.level.len() + removed.source.len() + 32;
                     *bytes_lock = bytes_lock.saturating_sub(removed_len);
                 }
             }
@@ -63,7 +72,8 @@ impl DiagnosticsBuffer {
     }
 
     pub fn clear(&self) {
-        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write()) {
+        if let (Ok(mut lock), Ok(mut bytes_lock)) = (self.logs.write(), self.retained_bytes.write())
+        {
             lock.clear();
             *bytes_lock = 0;
         }
@@ -71,13 +81,15 @@ impl DiagnosticsBuffer {
 }
 
 pub fn sanitize_diagnostic_text(text: &str) -> String {
-    // Redact common auth tokens, passwords, cookies, signed URL tokens, private headers
+    // Redact credentials and normalize URLs to their origin. Paths can contain signed or
+    // account-specific components just as easily as query parameters can.
     let mut result = text.to_string();
 
     let sensitive_patterns = [
         ("(?i)bearer [a-zA-Z0-9_\\-\\.]+", "Bearer [REDACTED]"),
-        ("(?i)authorization: [^\\s]+", "Authorization: [REDACTED]"),
-        ("(?i)cookie: [^\\s]+", "Cookie: [REDACTED]"),
+        ("(?i)(authorization:\\s*)[^\\r\\n]+", "$1[REDACTED]"),
+        ("(?i)(cookie:\\s*)[^\\r\\n]+", "$1[REDACTED]"),
+        ("(?i)(x-api-key:\\s*)[^\\s,;]+", "$1[REDACTED]"),
         ("(?i)api_key=[^&\\s]+", "api_key=[REDACTED]"),
         ("(?i)apikey=[^&\\s]+", "apikey=[REDACTED]"),
         ("(?i)password=[^&\\s]+", "password=[REDACTED]"),
@@ -86,6 +98,20 @@ pub fn sanitize_diagnostic_text(text: &str) -> String {
         ("(?i)signature=[a-zA-Z0-9_\\-\\.]+", "signature=[REDACTED]"),
         ("(?i)token=[a-zA-Z0-9_\\-\\.]+", "token=[REDACTED]"),
     ];
+
+    let url_pattern = regex::Regex::new(r#"(?i)https?://[^\s<>\"']+"#).expect("valid URL pattern");
+    result = url_pattern
+        .replace_all(&result, |captures: &regex::Captures<'_>| {
+            let raw = captures.get(0).map(|m| m.as_str()).unwrap_or_default();
+            let trimmed = raw.trim_end_matches(|ch: char| ".,;:!?)]}]".contains(ch));
+            let suffix = &raw[trimmed.len()..];
+            let normalized = url::Url::parse(trimmed)
+                .ok()
+                .map(|parsed| format!("{}/[REDACTED]", parsed.origin().ascii_serialization()))
+                .unwrap_or_else(|| "https://[REDACTED]".to_string());
+            format!("{normalized}{suffix}")
+        })
+        .to_string();
 
     for (pattern, replacement) in sensitive_patterns {
         if let Ok(re) = regex::Regex::new(pattern) {
@@ -108,6 +134,38 @@ mod tests {
         assert!(!cleaned.contains("supersecret"));
         assert!(!cleaned.contains("abc1234xyz"));
         assert!(cleaned.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_sanitization_normalizes_url_and_redacts_credentials_query_fragment_and_path() {
+        let dirty = "Provider error for https://user:password@media.example/video?X-Amz-Credential=account%2Fscope&custom_auth=secret-value&part=audio";
+        let cleaned = sanitize_diagnostic_text(dirty);
+
+        assert!(cleaned.contains("https://media.example/[REDACTED]"));
+        assert!(!cleaned.contains("/video"));
+        assert!(!cleaned.contains("user:password"));
+        assert!(!cleaned.contains("account%2Fscope"));
+        assert!(!cleaned.contains("secret-value"));
+        assert!(!cleaned.contains("part=audio"));
+    }
+
+    #[test]
+    fn test_sanitization_redacts_url_fragment_secrets() {
+        let cleaned =
+            sanitize_diagnostic_text("https://example.com/watch#access_token=fragment-secret");
+        assert_eq!(cleaned, "https://example.com/[REDACTED]");
+        assert!(!cleaned.contains("fragment-secret"));
+    }
+
+    #[test]
+    fn test_sanitization_redacts_complete_auth_headers() {
+        let dirty = "Authorization: Bearer secret-token extra\nCookie: session=secret-cookie; other=secret\nX-Api-Key: secret-api-key";
+        let cleaned = sanitize_diagnostic_text(dirty);
+
+        assert!(!cleaned.contains("secret-token"));
+        assert!(!cleaned.contains("secret-cookie"));
+        assert!(!cleaned.contains("other=secret"));
+        assert!(!cleaned.contains("secret-api-key"));
     }
 
     #[test]

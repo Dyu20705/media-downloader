@@ -24,19 +24,15 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'logs' | 'command'>('logs');
   const [commandPreview, setCommandPreview] = useState<string>(initialCmd);
-  const [isLoadingCmd, setIsLoadingCmd] = useState<boolean>(false);
 
   const handleSwitchToCommand = async () => {
     setActiveTab('command');
     if (onFetchCommandPreview && !commandPreview) {
       try {
-        setIsLoadingCmd(true);
         const cmd = await onFetchCommandPreview();
         setCommandPreview(cmd);
       } catch {
-        // ignore
-      } finally {
-        setIsLoadingCmd(false);
+        setCommandPreview('Command preview unavailable.');
       }
     }
   };
@@ -159,7 +155,7 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
               className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               {copiedCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedCmd ? 'Copied Command' : 'Copy Command'}</span>
+              <span>{copiedCmd ? 'Copied Arguments' : 'Copy Arguments'}</span>
             </button>
           )}
         </div>
@@ -168,10 +164,10 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
         {activeTab === 'command' && (
           <div className="flex-1 bg-zinc-950 p-4 font-mono text-xs text-zinc-200 overflow-y-auto space-y-3">
             <p className="text-zinc-400 text-xs font-sans">
-              This is the exact underlying CLI command compiled by the engine:
+              Planned argument vectors (JSON, not shell commands). Runtime paths are assigned when the job starts.
             </p>
-            <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-emerald-400 select-all break-all leading-relaxed">
-              {commandPreview || 'yt-dlp [URL]'}
+            <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-emerald-400 select-all break-all whitespace-pre-wrap leading-relaxed">
+              {commandPreview || 'No argument preview available.'}
             </div>
           </div>
         )}

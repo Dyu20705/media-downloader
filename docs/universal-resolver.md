@@ -1,6 +1,6 @@
 # Universal Media Resolver Architecture
 
-The **Universal Media Resolver** transforms One-Click Media Downloader from a site-specific tool into an adaptive, universal media intake engine. The user simply provides any URL, and the resolver analyzes, classifies, and selects the most efficient processing pipeline automatically without requiring deep format knowledge.
+The **Universal Media Resolver** transforms openDownloader from a site-specific tool into an adaptive, universal media intake engine. The user simply provides any URL, and the resolver analyzes, classifies, and selects the most efficient processing pipeline automatically without requiring deep format knowledge.
 
 ---
 
@@ -18,7 +18,7 @@ The **Universal Media Resolver** transforms One-Click Media Downloader from a si
 3. **No Unsolicited Speculative Scanning**: Resolution operations are lightweight, bounded by strict timeouts (15 seconds max), and execute zero heavy FFmpeg passes during metadata inspection.
 4. **Security & Ethical Integrity**:
    - Strictly reject non-HTTP/HTTPS schemes (e.g. `file://`, `gopher://`).
-   - Strictly reject private IP spoofing (e.g. `127.0.0.1`, `10.0.0.0/8`, `192.168.0.0/16`).
+   - Reject prohibited private/special-use addresses during URL preflight. In-process fallback HTTP validates and pins redirect destinations; yt-dlp may independently resolve and follow redirects, so this is not an end-to-end network boundary for delegated traffic.
    - Do NOT attempt to bypass DRM, login paywalls, CAPTCHAs, or token authorization systems. Clearly categorize these as `DRM_PROTECTED` or `REQUIRES_AUTHENTICATION`.
 
 ---
@@ -53,7 +53,7 @@ The **Universal Media Resolver** transforms One-Click Media Downloader from a si
 * `STREAM_COPY`: Zero quality loss, near-instant disk throughput.
 * `REMUX`: Container rewrite only (zero video/audio re-encoding).
 * `MERGE`: Native track multiplexing (e.g. 4K VP9 + Opus -> MKV).
-* `TRANSCODE`: CPU/GPU heavy re-encoding (only when explicitly requested by format preset).
+* `TRANSCODE`: CPU/GPU heavy re-encoding (only when required by the selected output profile).
 
 ---
 

@@ -2,12 +2,15 @@ import React from 'react';
 import { X, History, FolderOpen, Play, Info, CheckCircle2, XCircle, Ban } from 'lucide-react';
 import { DownloadJob } from '../types';
 import { ipc } from '../services/ipc';
+import { operationLabel, profileLabel } from '../acquisition';
 
 interface DownloadHistoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   jobs: DownloadJob[];
   onInspect: (job: DownloadJob) => void;
+  onRetry: (job: DownloadJob) => void;
+  onCancel: (job: DownloadJob) => void;
 }
 
 export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
@@ -15,14 +18,16 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
   onClose,
   jobs,
   onInspect,
+  onRetry,
+  onCancel,
 }) => {
   if (!isOpen) return null;
 
-  const handleOpenFolder = async (path?: string) => {
+  const handleOpenFolder = async (path?: string | null) => {
     if (path) await ipc.openFolder(path);
   };
 
-  const handleOpenFile = async (path?: string) => {
+  const handleOpenFile = async (path?: string | null) => {
     if (path) await ipc.openFile(path);
   };
 
@@ -74,7 +79,7 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                   <div className="flex items-center gap-2">
                     {job.status === 'COMPLETED' ? (
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" aria-hidden="true" />
-                    ) : job.status === 'FAILED' ? (
+                    ) : job.status === 'FAILED' || job.status === 'INTERRUPTED' ? (
                       <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" aria-hidden="true" />
                     ) : (
                       <Ban className="w-3.5 h-3.5 text-zinc-500 shrink-0" aria-hidden="true" />
@@ -84,7 +89,10 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                     </h3>
                   </div>
                   <div className="text-[11px] text-zinc-400 flex items-center gap-2">
-                    <span className="font-mono uppercase">{job.preset}</span>
+                    <span className={job.status === 'QUEUED' ? 'text-blue-300' : job.status === 'INTERRUPTED' ? 'text-amber-300' : ''}>
+                      {job.status === 'QUEUED' ? 'Queued · ' : job.status === 'INTERRUPTED' ? 'Interrupted · ' : ''}
+                      {operationLabel(job.acquisitionPlan.operation)} · {profileLabel(job.acquisitionPlan.outputProfile)}
+                    </span>
                     <span>•</span>
                     <span className="font-mono text-zinc-500 truncate max-w-[200px] sm:max-w-xs">
                       {job.finalFileName || job.url}
@@ -114,6 +122,26 @@ export const DownloadHistoryModal: React.FC<DownloadHistoryModalProps> = ({
                         <FolderOpen className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     </>
+                  )}
+                  {job.status === 'QUEUED' && (
+                    <button
+                      type="button"
+                      onClick={() => onCancel(job)}
+                      className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-red-900 text-zinc-200 text-xs font-medium focus-visible:ring-2 focus-visible:ring-blue-300"
+                      aria-label={`Cancel queued ${job.metadata?.title || 'download'}`}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  {['FAILED', 'INTERRUPTED', 'CANCELLED'].includes(job.status) && (
+                    <button
+                      type="button"
+                      onClick={() => onRetry(job)}
+                      className="px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium focus-visible:ring-2 focus-visible:ring-blue-300"
+                      aria-label={`Retry ${job.metadata?.title || 'download'}`}
+                    >
+                      Retry
+                    </button>
                   )}
                   {job.inspection && (
                     <button

@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use crate::diagnostics::DiagnosticsBuffer;
-use crate::tool_manager::{PinnedToolSpec, ToolManager, PINNED_TOOLS, get_pinned_tool_spec};
+use crate::tool_manager::ToolManager;
 use crate::types::{AppSettings, ToolHealth, ToolStatusInfo};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTool {
@@ -18,9 +18,12 @@ pub struct ToolResolver {
 
 impl ToolResolver {
     pub fn new() -> Self {
-        let diag = Arc::new(DiagnosticsBuffer::new());
+        Self::with_diagnostics(Arc::new(DiagnosticsBuffer::new()))
+    }
+
+    pub fn with_diagnostics(diagnostics: Arc<DiagnosticsBuffer>) -> Self {
         Self {
-            manager: ToolManager::new(None, diag),
+            manager: ToolManager::new(None, diagnostics),
         }
     }
 
@@ -41,7 +44,11 @@ impl ToolResolver {
         })
     }
 
-    pub async fn resolve_tool_with_settings(&self, tool_name: &str, settings: Option<&AppSettings>) -> Option<ResolvedTool> {
+    pub async fn resolve_tool_with_settings(
+        &self,
+        tool_name: &str,
+        settings: Option<&AppSettings>,
+    ) -> Option<ResolvedTool> {
         let resolved = self.manager.resolve_tool(tool_name, settings).await?;
         Some(ResolvedTool {
             name: resolved.name,
@@ -50,12 +57,24 @@ impl ToolResolver {
         })
     }
 
-    pub async fn get_all_tool_statuses(&self, settings: Option<&AppSettings>) -> Vec<ToolStatusInfo> {
+    pub async fn get_all_tool_statuses(
+        &self,
+        settings: Option<&AppSettings>,
+    ) -> Vec<ToolStatusInfo> {
         self.manager.get_all_tool_statuses(settings).await
     }
 
+    pub async fn get_all_tools_health_with_settings(
+        &self,
+        settings: Option<&AppSettings>,
+    ) -> Vec<ToolHealth> {
+        self.manager
+            .get_all_tools_health_with_settings(settings)
+            .await
+    }
+
     pub async fn get_all_tools_health(&self) -> Vec<ToolHealth> {
-        self.manager.get_all_tools_health().await
+        self.get_all_tools_health_with_settings(None).await
     }
 
     pub async fn check_health(&self) -> Vec<ToolHealth> {

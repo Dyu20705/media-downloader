@@ -1,71 +1,9 @@
-# Packaging & Release Distribution — One-Click Media Downloader
+# Packaging and release distribution
 
-## 1. Distribution Strategy
+The release workflow is intended to produce a Debian package for Linux x86_64, an NSIS installer for Windows x86_64, and a DMG for Intel macOS. Each release package is built on its native runner. The Linux CI workflow includes package metadata inspection and a headless launch smoke test; Windows and macOS installed-app smoke tests require owner-run machines or VMs.
 
-One-Click Media Downloader targets Windows 10/11 x64 as a standalone executable (`.exe`) and lightweight installer (`.exe` via NSIS).
+The stable release path is tag-triggered and must only publish a version whose commit is on `main`. Before native packaging, the release workflow runs the frontend boundary/type/lint/test/binding/build checks, locked Rust tests, formatting, Clippy, and npm/Rust dependency audits against the exact tagged SHA. PR/scheduled and release RustSec checks invoke the same repository-owned `scripts/ci/audit-rust.sh`: core has no exceptions; host accepts only RUSTSEC-2024-0370 and RUSTSEC-2024-0429 for v1.0.0, as documented in [the security disposition](release-remediation.md). All other warnings/advisories and yanked packages remain denied. The separate PR checks remain required for branch integration.
 
-### 1.1 WebView2 Strategy
-- **Mode**: `downloadBootstrapper` (recommended default).
-- **Rationale**: Windows 10 (recent updates) and Windows 11 include Evergreen WebView2 pre-installed. The bootstrapper checks for WebView2 and only downloads the runtime if missing, keeping the installer download size small (~5–10 MB instead of ~160 MB fixed runtime).
+An authorized human must review the release PR and explicitly accept the exact candidate commit before merge or tag creation. Signing credentials are supplied through the protected `production-release` GitHub Environment; they must never be stored in the repository. Windows Authenticode and macOS signing/notarization require protected owner credentials and native validation. Linux CI checks package metadata and launches the package; Windows/macOS install and startup checks require owner-controlled machines or VMs. See the workflow for exact required secrets and gates.
 
----
-
-## 2. Windows Installer Configuration (NSIS)
-
-Configured in `src-tauri/tauri.conf.json`:
-- **Installer Type**: NSIS (`.exe`)
-- **Installation Mode**: `currentUser` (installs to `%LOCALAPPDATA%\Programs\OneClickMediaDownloader`, requires no admin UAC elevation)
-- **Application Identifiers**:
-  - Name: `One-Click Media Downloader`
-  - Version: `1.0.0`
-  - Identifier: `com.oneclick.media.downloader`
-  - Publisher: `One-Click Media Downloader Team`
-- **Application Data Locations**:
-  - Settings: `%LOCALAPPDATA%\one-click-media-downloader\settings.json`
-  - Managed Tools: `%LOCALAPPDATA%\OneClickMediaDownloader\tools\`
-
----
-
-## 3. Production Build Commands
-
-### Step 1: Build Frontend
-```bash
-npm run build
-```
-Generates production assets in `dist/`.
-
-### Step 2: Build Tauri Release Bundle
-```bash
-npm run tauri build
-# Or directly via cargo:
-cargo tauri build
-```
-Outputs:
-- Standalone Executable: `src-tauri/target/release/one-click-media-downloader.exe`
-- NSIS Installer: `src-tauri/target/release/bundle/nsis/One-Click Media Downloader_1.0.0_x64-setup.exe`
-
----
-
-## 4. Production Code Signing Workflow
-
-To distribute on Windows without SmartScreen security warnings, binaries and installers must be code-signed.
-
-> **Security Rule**: Private signing keys, PFX certificates, and hardware token credentials must **NEVER** be committed to the source repository.
-
-### Signing Command Specification
-Using Microsoft `signtool.exe`:
-
-```cmd
-:: 1. Sign application executable
-signtool.exe sign /v /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 <CERTIFICATE_THUMBPRINT> "src-tauri\target\release\one-click-media-downloader.exe"
-
-:: 2. Sign NSIS setup installer
-signtool.exe sign /v /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 <CERTIFICATE_THUMBPRINT> "src-tauri\target\release\bundle\nsis\One-Click Media Downloader_1.0.0_x64-setup.exe"
-```
-
-### CI/CD Signing Integration
-In GitHub Actions / Azure DevOps:
-1. Store certificate in GitHub Encrypted Secrets (`WINDOWS_CERTIFICATE_BASE64`, `WINDOWS_CERTIFICATE_PASSWORD`).
-2. Decode to secure runner temporary directory.
-3. Sign using `signtool` before publishing release artifacts.
-4. Immediately wipe certificate files from runner disk.
+No production release has been published by this working branch. Do not treat locally generated bundles as signed production artifacts.

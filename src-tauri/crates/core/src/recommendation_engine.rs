@@ -68,8 +68,15 @@ impl RecommendationEngine {
                     is_transcode_free: true,
                     transcoding_cost: TranscodingCost::Merge,
                     estimated_size_bytes: formats.iter().filter_map(|f| f.filesize_approx).max(),
-                    container: if max_res > 1080 { "mkv".to_string() } else { "mp4".to_string() },
-                    details: Some("Multiplexes highest resolution video stream with master audio stream.".to_string()),
+                    container: if max_res > 1080 {
+                        "mkv".to_string()
+                    } else {
+                        "mp4".to_string()
+                    },
+                    details: Some(
+                        "Multiplexes highest resolution video stream with master audio stream."
+                            .to_string(),
+                    ),
                 }
             }
             UserIntent::SmallestSize => {
@@ -98,7 +105,9 @@ impl RecommendationEngine {
                     transcoding_cost: TranscodingCost::StreamCopy,
                     estimated_size_bytes: formats.iter().filter_map(|f| f.filesize_approx).min(),
                     container: "mp4".to_string(),
-                    details: Some("Selects compact 720p stream with efficient bitrates.".to_string()),
+                    details: Some(
+                        "Selects compact 720p stream with efficient bitrates.".to_string(),
+                    ),
                 }
             }
             UserIntent::BestCompatibility => {
@@ -117,15 +126,21 @@ impl RecommendationEngine {
 
                 FormatRecommendation {
                     preset: PresetType::Mp4Compatible,
-                    label: format!("MP4 · {}p Universal", if max_res >= 1080 { 1080 } else { 720 }),
+                    label: format!(
+                        "MP4 · {}p Universal",
+                        if max_res >= 1080 { 1080 } else { 720 }
+                    ),
                     target_quality,
-                    reason: "Widely supported MP4 container with H.264/AAC for all devices".to_string(),
+                    reason: "Widely supported MP4 container with H.264/AAC for all devices"
+                        .to_string(),
                     why_reasons: why,
                     is_transcode_free: true,
                     transcoding_cost: TranscodingCost::Merge,
                     estimated_size_bytes: None,
                     container: "mp4".to_string(),
-                    details: Some("Standard MP4 with wide hardware acceleration support.".to_string()),
+                    details: Some(
+                        "Standard MP4 with wide hardware acceleration support.".to_string(),
+                    ),
                 }
             }
             UserIntent::Balanced => {
@@ -156,13 +171,17 @@ impl RecommendationEngine {
                     preset: PresetType::Mp4Compatible,
                     label,
                     target_quality,
-                    reason: "Optimal balance of visual fidelity, file size, and compatibility".to_string(),
+                    reason: "Optimal balance of visual fidelity, file size, and compatibility"
+                        .to_string(),
                     why_reasons: why,
                     is_transcode_free: true,
                     transcoding_cost: TranscodingCost::Merge,
                     estimated_size_bytes: None,
                     container: "mp4".to_string(),
-                    details: Some("Combines Full HD visuals with standard audio in MP4 container.".to_string()),
+                    details: Some(
+                        "Combines Full HD visuals with standard audio in MP4 container."
+                            .to_string(),
+                    ),
                 }
             }
         }
@@ -235,8 +254,7 @@ impl RecommendationEngine {
                 preset: PresetType::BestAudio,
                 label: "Best Audio · Source Format".to_string(),
                 target_quality: "auto".to_string(),
-                reason: "Preserve the best available source audio format when possible"
-                    .to_string(),
+                reason: "Preserve the best available source audio format when possible".to_string(),
                 why_reasons: vec![
                     "✓ source format preserved when possible".to_string(),
                     "✓ no unnecessary lossy transcode".to_string(),
@@ -246,9 +264,7 @@ impl RecommendationEngine {
                 transcoding_cost: TranscodingCost::StreamCopy,
                 estimated_size_bytes: None,
                 container: "source-dependent".to_string(),
-                details: Some(
-                    "Keeps the source codec and extension when possible.".to_string(),
-                ),
+                details: Some("Keeps the source codec and extension when possible.".to_string()),
             },
         }
     }
@@ -290,7 +306,10 @@ mod tests {
         assert_eq!(rec.preset, PresetType::Mp4Compatible);
         assert_eq!(rec.target_quality, "720");
         assert!(rec.label.contains("Space-Saver"));
-        assert!(rec.why_reasons.iter().any(|w| w.contains("lowest storage footprint")));
+        assert!(rec
+            .why_reasons
+            .iter()
+            .any(|w| w.contains("lowest storage footprint")));
     }
 
     #[test]
@@ -306,7 +325,10 @@ mod tests {
 
         assert_eq!(rec.preset, PresetType::Mp4Compatible);
         assert_eq!(rec.container, "mp4");
-        assert!(rec.why_reasons.iter().any(|w| w.contains("universal H.264")));
+        assert!(rec
+            .why_reasons
+            .iter()
+            .any(|w| w.contains("universal H.264")));
     }
 
     #[test]

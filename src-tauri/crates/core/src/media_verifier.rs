@@ -1,39 +1,44 @@
+use crate::types::{
+    AcquisitionOperation, DownloadJob, ExplainableResult, MediaInspection, OutputMediaArtifact,
+    TranscodingCost, VerificationChecklist, VerificationLevel, VerificationResult,
+};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
-use crate::tools::ToolResolver;
-use crate::types::{
-    DownloadJob, ExplainableResult, MediaInspection, MediaKind, OutputMediaArtifact,
-    PresetType, TranscodingCost, VerificationChecklist, VerificationResult,
-};
 
 pub async fn verify_and_inspect_media(
     file_path: &Path,
-    tool_resolver: &Arc<ToolResolver>,
+    ffprobe_path: Option<&Path>,
     is_lossy_transcode_warning: bool,
 ) -> Result<MediaInspection, String> {
     if !file_path.exists() {
         return Err(format!("File does not exist: {}", file_path.display()));
     }
 
-    let metadata = std::fs::metadata(file_path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let metadata =
+        std::fs::metadata(file_path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
 
     let file_size_bytes = metadata.len();
     if file_size_bytes == 0 {
-        return Err(format!("Downloaded file is empty (0 bytes): {}", file_path.display()));
+        return Err(format!(
+            "Downloaded file is empty (0 bytes): {}",
+            file_path.display()
+        ));
     }
 
-    // Try ffprobe first
-    if let Some(ffprobe_tool) = tool_resolver.resolve_tool("ffprobe").await {
-        if let Ok(inspection) = inspect_with_ffprobe(&ffprobe_tool.path, file_path, file_size_bytes, is_lossy_transcode_warning).await {
-            return Ok(inspection);
-        }
+    if let Some(ffprobe_path) = ffprobe_path {
+        return inspect_with_ffprobe(
+            ffprobe_path,
+            file_path,
+            file_size_bytes,
+            is_lossy_transcode_warning,
+        )
+        .await
+        .map_err(|error| format!("Deep media verification failed: {error}"));
     }
 
-    // Fallback if ffprobe isn't present or errored
+    // Basic inspection is deliberately not equivalent to successful verification.
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
@@ -41,6 +46,7 @@ pub async fn verify_and_inspect_media(
         .to_lowercase();
 
     Ok(MediaInspection {
+        verification_level: VerificationLevel::BasicInspection,
         container_format: ext.to_uppercase(),
         video_codec: None,
         video_profile: None,
@@ -61,35 +67,122 @@ pub async fn verify_and_inspect_media(
         is_lossy_transcode_warning,
         stream_count: None,
         chapters_count: None,
+        subtitle_stream_count: 0,
     })
 }
 
 /// Generates full VerificationResult and ExplainableResult from completed job and inspection
+pub async fn verify_subtitle(path: &Path) -> Result<MediaInspection, String> {
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > 16 * 1024 * 1024 {
+        return Err("Subtitle exceeds the 16 MiB inspection limit".into());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let text = text.trim_start_matches('\u{feff}');
+    if !valid_webvtt(text) {
+        return Err("Subtitle is not a WebVTT document with timed cues".into());
+    }
+    let mut inspection = verify_and_inspect_media(path, None, false).await?;
+    inspection.verification_level = VerificationLevel::Verified;
+    inspection.container_format = "vtt".into();
+    Ok(inspection)
+}
+
+fn valid_webvtt(text: &str) -> bool {
+    let header = text.lines().next().unwrap_or_default();
+    if header != "WEBVTT" && !header.starts_with("WEBVTT ") && !header.starts_with("WEBVTT\t") {
+        return false;
+    }
+    let timestamp = |value: &str| -> Option<f64> {
+        let parts: Vec<_> = value.split(':').collect();
+        if !(2..=3).contains(&parts.len()) {
+            return None;
+        }
+        let seconds = parts[parts.len() - 1].parse::<f64>().ok()?;
+        let minutes = parts[parts.len() - 2].parse::<u32>().ok()?;
+        let hours = if parts.len() == 3 {
+            parts[0].parse::<u32>().ok()?
+        } else {
+            0
+        };
+        if !seconds.is_finite() || !(0.0..60.0).contains(&seconds) || minutes >= 60 {
+            return None;
+        }
+        Some(hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds)
+    };
+    let mut cues = 0;
+    for line in text.lines().filter(|line| line.contains("-->")) {
+        let Some((start, end)) = line.split_once("-->") else {
+            return false;
+        };
+        let Some(start) = timestamp(start.trim()) else {
+            return false;
+        };
+        let Some(end) = end.split_whitespace().next().and_then(timestamp) else {
+            return false;
+        };
+        if end <= start {
+            return false;
+        }
+        cues += 1;
+    }
+    cues > 0
+}
+
 pub fn generate_verification_and_explanation(
     job: &DownloadJob,
     inspection: &MediaInspection,
     file_path: &str,
 ) -> (VerificationResult, ExplainableResult) {
     let now = {
-        let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let dur = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
         format!("{}.{:03}Z", dur.as_secs(), dur.subsec_millis())
     };
 
     let is_audio_only = matches!(
-        job.preset,
-        PresetType::BestAudio | PresetType::Mp3 | PresetType::Flac
-    ) || job.metadata.media_kind == MediaKind::Audio;
+        job.acquisition_plan.operation,
+        AcquisitionOperation::AudioOnly
+    );
 
     let file_exists = std::path::Path::new(file_path).exists();
-    let file_size_valid = inspection.file_size_bytes > 1024;
-    let duration_valid = inspection.duration_seconds.map(|d| d > 0.0).unwrap_or(true);
-    let video_stream_valid = if is_audio_only { true } else { inspection.video_codec.is_some() || !inspection.container_format.is_empty() };
-    let audio_stream_valid = inspection.audio_codec.is_some() || !inspection.container_format.is_empty();
-    let container_valid = !inspection.container_format.is_empty();
+    let thumbnail = matches!(
+        job.acquisition_plan.operation,
+        AcquisitionOperation::ThumbnailOnly
+    );
+    let subtitle = matches!(
+        job.acquisition_plan.operation,
+        AcquisitionOperation::SubtitlesOnly
+    );
+    let sidecar = thumbnail || subtitle;
+    let file_size_valid = inspection.file_size_bytes > if sidecar { 0 } else { 1024 };
+    let duration_valid = sidecar || inspection.duration_seconds.is_some_and(|d| d > 0.0);
+    let expects_video = thumbnail || (!sidecar && !is_audio_only && job.metadata.has_video);
+    let expects_audio = !sidecar && (is_audio_only || job.metadata.has_audio);
+    let video_stream_valid = if thumbnail {
+        inspection.video_codec.as_deref() == Some("mjpeg")
+            && inspection.width.is_some_and(|v| v > 0)
+            && inspection.height.is_some_and(|v| v > 0)
+    } else if !expects_video {
+        true
+    } else {
+        inspection.video_codec.is_some()
+    };
+    let audio_stream_valid = !expects_audio || inspection.audio_codec.is_some();
+    let container_valid = !inspection.container_format.is_empty()
+        && !inspection.container_format.eq_ignore_ascii_case("unknown");
 
     let mut notes = Vec::new();
+    if sidecar {
+        notes
+            .push("Duration and absent media streams are not applicable for this artifact.".into());
+    }
     if file_size_valid {
-        notes.push(format!("File verified: {:.2} MB", inspection.file_size_bytes as f64 / (1024.0 * 1024.0)));
+        notes.push(format!(
+            "File verified: {:.2} MB",
+            inspection.file_size_bytes as f64 / (1024.0 * 1024.0)
+        ));
     }
     if let Some(dur) = inspection.duration_seconds {
         notes.push(format!("Duration verified: {:.1}s", dur));
@@ -116,7 +209,16 @@ pub fn generate_verification_and_explanation(
         notes,
     };
 
-    let is_valid = file_exists && file_size_valid && container_valid;
+    let plan_verification =
+        crate::plan_verifier::verify_against_plan(&job.acquisition_plan, inspection);
+    let is_valid = plan_verification.conforms
+        && inspection.verification_level == VerificationLevel::Verified
+        && file_exists
+        && file_size_valid
+        && duration_valid
+        && video_stream_valid
+        && audio_stream_valid
+        && container_valid;
 
     let output_artifact = OutputMediaArtifact {
         artifact_path: file_path.to_string(),
@@ -136,50 +238,82 @@ pub fn generate_verification_and_explanation(
     };
 
     // Construct specs label (e.g. "1080p60 H.264 + AAC" or "Audio · 320kbps MP3")
-    let specs_label = if is_audio_only {
-        let codec = inspection.audio_codec.as_deref().unwrap_or("Audio");
-        let br = inspection.audio_bitrate_kbps.map(|b| format!(" · {}kbps", b)).unwrap_or_default();
-        format!("{} {}{}", inspection.container_format, codec.to_uppercase(), br)
+    let specs_label = if subtitle {
+        "WebVTT subtitles".to_string()
+    } else if thumbnail {
+        format!(
+            "JPEG thumbnail · {}×{}",
+            inspection.width.unwrap_or(0),
+            inspection.height.unwrap_or(0)
+        )
+    } else if is_audio_only {
+        let codec = inspection.audio_codec.as_deref().unwrap_or("unknown");
+        let br = inspection
+            .audio_bitrate_kbps
+            .map(|b| format!(" · {}kbps", b))
+            .unwrap_or_default();
+        format!(
+            "{} {}{}",
+            inspection.container_format,
+            codec.to_uppercase(),
+            br
+        )
     } else {
-        let height = inspection.height.unwrap_or(1080);
-        let fps_str = inspection.fps.map(|f| format!("p{:.0}", f)).unwrap_or_else(|| "p".to_string());
-        let vcodec = inspection.video_codec.as_deref().unwrap_or("H.264");
-        let acodec = inspection.audio_codec.as_deref().unwrap_or("AAC");
-        format!("{}{} {} + {}", height, fps_str, vcodec.to_uppercase(), acodec.to_uppercase())
+        let resolution = inspection
+            .height
+            .map(|height| format!("{height}p"))
+            .unwrap_or_else(|| "unknown resolution".to_string());
+        let fps = inspection
+            .fps
+            .map(|fps| format!("{fps:.0}fps "))
+            .unwrap_or_default();
+        let vcodec = inspection.video_codec.as_deref().unwrap_or("unknown video");
+        let acodec = inspection.audio_codec.as_deref().unwrap_or("unknown audio");
+        format!(
+            "{resolution} {fps}{} + {}",
+            vcodec.to_uppercase(),
+            acodec.to_uppercase()
+        )
     };
 
-    let why_reasons = if let Some(rec) = &job.metadata.smart_recommendation {
-        rec.why_reasons.clone()
-    } else {
-        vec![
-            "✓ matched requested quality target".to_string(),
-            "✓ native stream container encapsulation".to_string(),
-            "✓ no unnecessary generational transcoding".to_string(),
-            "✓ full stream integrity verified".to_string(),
-        ]
+    let why_reasons = vec![
+        format!("Executed acquisition plan {}", job.acquisition_plan.id),
+        if plan_verification.conforms {
+            "Output conforms to the inspected plan properties.".into()
+        } else {
+            "Output does not conform to the reviewed plan.".into()
+        },
+    ];
+    use crate::types::ProcessingClass;
+    let transcoding_cost = match job.acquisition_plan.processing.class {
+        ProcessingClass::SourcePreserved => TranscodingCost::StreamCopy,
+        ProcessingClass::MergeOnly => TranscodingCost::Merge,
+        ProcessingClass::RemuxOnly => TranscodingCost::Remux,
+        ProcessingClass::AudioTranscode
+        | ProcessingClass::VideoTranscode
+        | ProcessingClass::FullTranscode => TranscodingCost::Transcode,
+        ProcessingClass::Unknown => TranscodingCost::NoProcessing,
     };
-
-    let transcoding_cost = job.metadata.transcoding_cost.unwrap_or(TranscodingCost::Merge);
-    let processing_summary = match transcoding_cost {
-        TranscodingCost::StreamCopy => "Direct stream copy (zero bitstream modification)".to_string(),
-        TranscodingCost::Merge => "Merged video and audio bitstreams without video re-encode".to_string(),
-        TranscodingCost::Remux => "Remuxed container packaging (zero re-encoding)".to_string(),
-        TranscodingCost::Transcode => "Transcoded audio to requested target codec".to_string(),
-        TranscodingCost::NoProcessing => "Media acquired".to_string(),
-    };
+    let processing_summary = job.acquisition_plan.processing.steps.join("; ");
 
     let explainable_result = ExplainableResult {
         title: job.metadata.title.clone(),
         specs_label,
         why_reasons,
-        processing_summary,
+        processing_summary: if sidecar {
+            job.acquisition_plan.processing.steps.join("; ")
+        } else {
+            processing_summary
+        },
         transcoding_cost,
         verification_checklist: checklist.clone(),
         recipe_id: job.recipe.as_ref().map(|r| r.id.clone()),
     };
 
     let verification_result = VerificationResult {
+        plan_verification,
         is_valid,
+        verification_level: inspection.verification_level,
         checklist,
         output_artifact: Some(output_artifact),
         fingerprint: job.fingerprint.clone(),
@@ -194,20 +328,28 @@ async fn inspect_with_ffprobe(
     file_size_bytes: u64,
     is_lossy_transcode_warning: bool,
 ) -> Result<MediaInspection, String> {
-    let output = Command::new(ffprobe_bin)
+    let mut command = Command::new(ffprobe_bin);
+    command
         .arg("-v")
         .arg("quiet")
         .arg("-print_format")
         .arg("json")
         .arg("-show_format")
         .arg("-show_streams")
-        .arg(file_path)
-        .output()
+        .arg("-show_chapters")
+        .arg(file_path);
+
+    let output = tokio::time::timeout(Duration::from_secs(20), command.output())
         .await
+        .map_err(|_| "ffprobe timed out after 20 seconds".to_string())?
         .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
 
     if !output.status.success() {
-        return Err("ffprobe exited with non-zero status".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "ffprobe exited with non-zero status: {}",
+            stderr.trim()
+        ));
     }
 
     let json_text = String::from_utf8_lossy(&output.stdout);
@@ -225,7 +367,11 @@ async fn inspect_with_ffprobe(
 
     if let Some(fmt) = root.get("format") {
         if let Some(fmt_name) = fmt.get("format_name").and_then(|v| v.as_str()) {
-            container_format = fmt_name.split(',').next().unwrap_or(fmt_name).to_uppercase();
+            container_format = fmt_name
+                .split(',')
+                .next()
+                .unwrap_or(fmt_name)
+                .to_uppercase();
         }
         if let Some(d_str) = fmt.get("duration").and_then(|v| v.as_str()) {
             duration_seconds = d_str.parse::<f64>().ok();
@@ -251,22 +397,58 @@ async fn inspect_with_ffprobe(
     let mut audio_bitrate_kbps = None;
     let mut audio_language = None;
     let mut stream_count = 0u32;
+    let mut subtitle_stream_count = 0u32;
 
     if let Some(streams) = root.get("streams").and_then(|s| s.as_array()) {
         stream_count = streams.len() as u32;
         for stream in streams {
-            let codec_type = stream.get("codec_type").and_then(|v| v.as_str()).unwrap_or("");
-            if codec_type == "video" && video_codec.is_none() {
-                video_codec = stream.get("codec_name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                video_profile = stream.get("profile").and_then(|v| v.as_str()).map(|s| s.to_string());
-                width = stream.get("width").and_then(|v| v.as_u64()).map(|w| w as u32);
-                height = stream.get("height").and_then(|v| v.as_u64()).map(|h| h as u32);
-                bit_depth = stream.get("bits_per_raw_sample").and_then(|v| v.as_str()).and_then(|s| s.parse::<u32>().ok());
-                color_space = stream.get("color_space").or_else(|| stream.get("color_transfer")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                
+            let codec_type = stream
+                .get("codec_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if codec_type == "subtitle" {
+                subtitle_stream_count += 1;
+            }
+            if codec_type == "video"
+                && video_codec.is_none()
+                && stream
+                    .pointer("/disposition/attached_pic")
+                    .and_then(|v| v.as_u64())
+                    != Some(1)
+            {
+                video_codec = stream
+                    .get("codec_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                video_profile = stream
+                    .get("profile")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                width = stream
+                    .get("width")
+                    .and_then(|v| v.as_u64())
+                    .map(|w| w as u32);
+                height = stream
+                    .get("height")
+                    .and_then(|v| v.as_u64())
+                    .map(|h| h as u32);
+                bit_depth = stream
+                    .get("bits_per_raw_sample")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<u32>().ok());
+                color_space = stream
+                    .get("color_space")
+                    .or_else(|| stream.get("color_transfer"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
                 if let Some(ref cs) = color_space {
                     let cs_l = cs.to_lowercase();
-                    if cs_l.contains("bt2020") || cs_l.contains("smpte2084") || cs_l.contains("arib-std-b67") || cs_l.contains("hdr") {
+                    if cs_l.contains("bt2020")
+                        || cs_l.contains("smpte2084")
+                        || cs_l.contains("arib-std-b67")
+                        || cs_l.contains("hdr")
+                    {
                         is_hdr = true;
                     }
                 }
@@ -277,7 +459,9 @@ async fn inspect_with_ffprobe(
                 if let Some(r_frame_rate) = stream.get("r_frame_rate").and_then(|v| v.as_str()) {
                     let parts: Vec<&str> = r_frame_rate.split('/').collect();
                     if parts.len() == 2 {
-                        if let (Ok(num), Ok(den)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+                        if let (Ok(num), Ok(den)) =
+                            (parts[0].parse::<f64>(), parts[1].parse::<f64>())
+                        {
                             if den > 0.0 {
                                 fps = Some((num / den * 100.0).round() / 100.0);
                             }
@@ -285,22 +469,43 @@ async fn inspect_with_ffprobe(
                     }
                 }
             } else if codec_type == "audio" && audio_codec.is_none() {
-                audio_codec = stream.get("codec_name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                audio_channels = stream.get("channels").and_then(|v| v.as_u64()).map(|c| c as u32);
-                audio_sample_rate_hz = stream.get("sample_rate").and_then(|v| v.as_str()).and_then(|sr| sr.parse::<u32>().ok());
+                audio_codec = stream
+                    .get("codec_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                audio_channels = stream
+                    .get("channels")
+                    .and_then(|v| v.as_u64())
+                    .map(|c| c as u32);
+                audio_sample_rate_hz = stream
+                    .get("sample_rate")
+                    .and_then(|v| v.as_str())
+                    .and_then(|sr| sr.parse::<u32>().ok());
                 if let Some(abr_str) = stream.get("bit_rate").and_then(|v| v.as_str()) {
                     if let Ok(abr) = abr_str.parse::<u64>() {
                         audio_bitrate_kbps = Some(abr / 1000);
                     }
                 }
-                audio_language = stream.get("tags").and_then(|t| t.get("language")).and_then(|v| v.as_str()).map(|s| s.to_string());
+                audio_language = stream
+                    .get("tags")
+                    .and_then(|t| t.get("language"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
             }
         }
     }
 
-    let chapters_count = root.get("chapters").and_then(|c| c.as_array()).map(|arr| arr.len() as u32);
+    if stream_count == 0 || (video_codec.is_none() && audio_codec.is_none()) {
+        return Err("ffprobe found no playable audio or video streams".to_string());
+    }
+
+    let chapters_count = root
+        .get("chapters")
+        .and_then(|c| c.as_array())
+        .map(|arr| arr.len() as u32);
 
     Ok(MediaInspection {
+        verification_level: VerificationLevel::Verified,
         container_format,
         video_codec,
         video_profile,
@@ -321,6 +526,7 @@ async fn inspect_with_ffprobe(
         is_lossy_transcode_warning,
         stream_count: Some(stream_count),
         chapters_count,
+        subtitle_stream_count,
     })
 }
 
@@ -337,7 +543,10 @@ pub fn resolve_final_download_path(output_dir: &Path, media_id: &str) -> Option<
             if path.is_file() {
                 if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
                     // Check if filename contains media_id and is not a partial/temp download (.part, .ytdl, etc)
-                    if fname.contains(media_id) && !fname.ends_with(".part") && !fname.ends_with(".ytdl") {
+                    if fname.contains(media_id)
+                        && !fname.ends_with(".part")
+                        && !fname.ends_with(".ytdl")
+                    {
                         if let Ok(meta) = entry.metadata() {
                             let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
                             matching_files.push((path, modified));
@@ -348,11 +557,60 @@ pub fn resolve_final_download_path(output_dir: &Path, media_id: &str) -> Option<
         }
 
         // Return the most recently modified matching file
-        matching_files.sort_by(|a, b| b.1.cmp(&a.1));
+        matching_files.sort_by_key(|candidate| std::cmp::Reverse(candidate.1));
         if let Some((best_match, _)) = matching_files.into_iter().next() {
             return Some(best_match);
         }
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn subtitle_validation_rejects_html_and_invalid_timing() {
+        assert!(valid_webvtt("WEBVTT\n\n00:00.000 --> 00:02.500\nHello\n"));
+        assert!(!valid_webvtt("<html>error</html>"));
+        assert!(!valid_webvtt("WEBVTT\n\ngarbage --> garbage\n"));
+        assert!(!valid_webvtt("WEBVTT\n\n00:04.000 --> 00:02.500\nHello"));
+        assert!(!valid_webvtt("WEBVTT\n\n"));
+    }
+
+    #[tokio::test]
+    async fn missing_ffprobe_produces_basic_inspection_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let media = directory.path().join("candidate.mp4");
+        std::fs::write(&media, vec![0_u8; 2048]).unwrap();
+
+        let inspection = verify_and_inspect_media(&media, None, false).await.unwrap();
+        assert_eq!(
+            inspection.verification_level,
+            VerificationLevel::BasicInspection
+        );
+        assert!(inspection.video_codec.is_none());
+        assert!(inspection.audio_codec.is_none());
+        assert!(inspection.duration_seconds.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_ffprobe_does_not_fall_back_to_success() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let media = directory.path().join("truncated.mp4");
+        let probe = directory.path().join("ffprobe");
+        std::fs::write(&media, vec![0_u8; 2048]).unwrap();
+        std::fs::write(&probe, b"#!/bin/sh\necho 'corrupt input' >&2\nexit 1\n").unwrap();
+        let mut permissions = std::fs::metadata(&probe).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&probe, permissions).unwrap();
+
+        let result = verify_and_inspect_media(&media, Some(&probe), false).await;
+        assert!(result
+            .unwrap_err()
+            .contains("Deep media verification failed"));
+    }
 }

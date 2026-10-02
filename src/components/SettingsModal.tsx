@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Settings as SettingsIcon, Save, Wrench } from 'lucide-react';
-import { AppSettings, PresetType } from '../types';
+import { AppSettings, PresetType, SponsorBlockMode, SubtitleMode } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -79,10 +79,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             />
           </div>
 
-          {/* Default Preset */}
+          {/* Backward-compatible default workflow */}
           <div className="space-y-1.5">
             <label htmlFor="settings-default-preset" className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-              Default Format
+              Default Workflow
             </label>
             <select
               id="settings-default-preset"
@@ -90,11 +90,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onChange={(e) => setForm({ ...form, lastPreset: e.target.value as PresetType })}
               className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500"
             >
-              <option value="mp4-compatible">MP4 — Compatible (Default Video)</option>
-              <option value="best-video">Best Video (Highest Quality MKV)</option>
-              <option value="best-audio">Best Audio (Source Preservation)</option>
-              <option value="mp3">MP3 (Universal, Lossy)</option>
-              <option value="flac">FLAC Output</option>
+              <option value="mp4-compatible">Entire Media · Universal</option>
+              <option value="best-video">Entire Media · Best Source</option>
+              <option value="best-audio">Audio Only · Best Source</option>
+              <option value="mp3">Audio Only · Universal</option>
+              <option value="flac">Audio Only · Editing</option>
             </select>
           </div>
 
@@ -152,7 +152,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <select
               id="settings-sponsorblock"
               value={form.sponsorBlockMode || 'off'}
-              onChange={(e) => setForm({ ...form, sponsorBlockMode: e.target.value as any })}
+              onChange={(e) => setForm({ ...form, sponsorBlockMode: e.target.value as SponsorBlockMode })}
               className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               <option value="off">Off — Keep all original segments</option>
@@ -172,7 +172,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <select
               id="settings-subtitles-mode"
               value={form.subtitleMode || 'none'}
-              onChange={(e) => setForm({ ...form, subtitleMode: e.target.value as any })}
+              onChange={(e) => setForm({ ...form, subtitleMode: e.target.value as SubtitleMode })}
               className="w-full px-3.5 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-200 focus:border-blue-500"
             >
               <option value="none">Do not download subtitles</option>
@@ -183,16 +183,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {form.subtitleMode && form.subtitleMode !== 'none' && (
               <div className="pt-1.5 space-y-1">
                 <label htmlFor="settings-sub-lang" className="block text-[11px] text-zinc-400 font-mono">
-                  Preferred Languages (yt-dlp regex / comma-separated)
+                  Preferred languages (patterns / comma-separated)
                 </label>
                 <input
                   id="settings-sub-lang"
                   type="text"
-                  placeholder="en.*,en (or 'all' for all languages)"
-                  value={form.preferredSubtitleLanguage || 'en'}
+                  placeholder="en.*,ja or all,-live_chat"
+                  value={form.preferredSubtitleLanguage ?? 'en'}
                   onChange={(e) => setForm({ ...form, preferredSubtitleLanguage: e.target.value })}
                   className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-200 focus:border-blue-500"
                 />
+                <p className="text-[11px] text-zinc-500">Applied to video, clip and chapter downloads. Patterns are resolved to available manual tracks in the plan; an empty preference uses en. Use all or -language exclusions. Lookaround and backreferences are not supported.</p>
               </div>
             )}
           </div>

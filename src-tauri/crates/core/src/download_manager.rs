@@ -1,34 +1,41 @@
+use chrono::Local;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use chrono::Local;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::diagnostics::DiagnosticsBuffer;
+use crate::execution::compile_acquisition_args;
 use crate::media_verifier::{resolve_final_download_path, verify_and_inspect_media};
 use crate::path_validator::validate_and_ensure_directory;
-use crate::presets::compile_download_args;
-use crate::process_runner::ProcessHandle;
+use crate::persistence::JobStore;
+use crate::planner::AcquisitionPlanner;
+use crate::process_runner::{ProcessHandle, OUTPUT_CHANNEL_CAPACITY};
 use crate::progress_parser::{parse_progress_line, ParsedLineEvent};
 use crate::settings::SettingsManager;
 use crate::state_machine::DownloadStateMachine;
 use crate::tools::ToolResolver;
 use crate::types::{
-    DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest,
+    AcquisitionOperation, DownloadJob, DownloadProgress, DownloadStatus, StartDownloadRequest,
 };
-use crate::url_validator::validate_media_url;
+use crate::url_validator::validate_media_url_network;
 
 pub struct ActiveJobHandle {
     pub job_id: String,
     pub cancel_sender: mpsc::Sender<()>,
 }
 
+#[derive(Clone)]
 pub struct DownloadManager {
     tool_resolver: Arc<ToolResolver>,
     diagnostics: Arc<DiagnosticsBuffer>,
     settings: Arc<SettingsManager>,
     active_job: Arc<RwLock<Option<DownloadJob>>>,
     active_handle: Arc<Mutex<Option<ActiveJobHandle>>>,
+    admission_lock: Arc<Mutex<()>>,
+    job_store: Option<Arc<JobStore>>,
+    pending_queue: Arc<Mutex<VecDeque<(String, StartDownloadRequest)>>>,
 }
 
 impl DownloadManager {
@@ -43,7 +50,64 @@ impl DownloadManager {
             settings,
             active_job: Arc::new(RwLock::new(None)),
             active_handle: Arc::new(Mutex::new(None)),
+            admission_lock: Arc::new(Mutex::new(())),
+            job_store: None,
+            pending_queue: Arc::new(Mutex::new(VecDeque::new())),
         }
+    }
+
+    pub fn with_job_store(mut self, store: Arc<JobStore>) -> Self {
+        self.job_store = Some(store);
+        self
+    }
+
+    pub fn list_jobs(&self, limit: usize) -> Result<Vec<DownloadJob>, String> {
+        self.job_store
+            .as_ref()
+            .map_or(Ok(Vec::new()), |store| store.list(limit))
+    }
+
+    pub async fn retry_job(&self, job_id: &str) -> Result<DownloadJob, String> {
+        let store = self
+            .job_store
+            .as_ref()
+            .ok_or("Persistent history is unavailable")?;
+        let previous = store
+            .list(500)?
+            .into_iter()
+            .find(|job| job.id == job_id)
+            .ok_or("Download history entry was not found")?;
+        if !matches!(
+            previous.status,
+            DownloadStatus::Failed | DownloadStatus::Interrupted | DownloadStatus::Cancelled
+        ) {
+            return Err("Only failed, interrupted, or cancelled downloads can be retried".into());
+        }
+        let mut request = previous.acquisition_request.ok_or("This download cannot be retried safely. Paste the source URL and review the plan again.")?;
+        if previous.url == "[REDACTED]"
+            || (!previous.url.starts_with("https://") && !previous.url.starts_with("http://"))
+        {
+            return Err(
+                "The source URL was not saved for privacy. Paste it again and review the plan."
+                    .into(),
+            );
+        }
+        let mut metadata = previous.metadata;
+        metadata.webpage_url = previous.url;
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &metadata,
+            metadata.source_type.unwrap_or_default(),
+        );
+        let current_settings = self.settings.get_settings();
+        let plan =
+            AcquisitionPlanner::plan_with_policy(&graph, &request, (&current_settings).into())?;
+        request.output_directory = previous.output_directory;
+        self.start_download(StartDownloadRequest {
+            expected_plan_id: plan.id,
+            metadata,
+            acquisition: request,
+        })
+        .await
     }
 
     pub async fn get_active_job(&self) -> Option<DownloadJob> {
@@ -54,48 +118,128 @@ impl DownloadManager {
         &self,
         request: StartDownloadRequest,
     ) -> Result<DownloadJob, String> {
-        // 1. Check concurrency lock (1 active job per performance contract)
-        if let Some(existing) = self.get_active_job().await {
-            if matches!(
+        self.start_download_with_id(request, None).await
+    }
+
+    async fn start_download_with_id(
+        &self,
+        request: StartDownloadRequest,
+        queued_job_id: Option<String>,
+    ) -> Result<DownloadJob, String> {
+        // Admission, process spawn, and slot publication are one atomic operation.
+        let _admission_guard = self.admission_lock.lock().await;
+        let is_busy = self.get_active_job().await.is_some_and(|existing| {
+            matches!(
                 existing.status,
                 DownloadStatus::Downloading
                     | DownloadStatus::PostProcessing
                     | DownloadStatus::Verifying
                     | DownloadStatus::Cancelling
-            ) {
-                return Err("A download is already in progress. Only 1 concurrent download is permitted.".to_string());
+            )
+        });
+
+        // Bind admission to the plan the user reviewed, before filesystem or network work.
+        let source_graph = crate::media_graph::MediaGraph::build_source_graph(
+            &request.metadata,
+            request.metadata.source_type.unwrap_or_default(),
+        );
+        let current_settings = self.settings.get_settings();
+        let plan = AcquisitionPlanner::plan_with_policy(
+            &source_graph,
+            &request.acquisition,
+            (&current_settings).into(),
+        )?;
+        if plan.id != request.expected_plan_id {
+            return Err(
+                "Acquisition plan changed. Review the updated plan before downloading.".into(),
+            );
+        }
+        if is_busy && queued_job_id.is_none() {
+            let id = format!(
+                "job-{}-{}",
+                Local::now().timestamp_millis(),
+                std::process::id()
+            );
+            let queued = DownloadJob {
+                id: id.clone(),
+                url: request.metadata.webpage_url.clone(),
+                output_directory: request.acquisition.output_directory.clone(),
+                status: DownloadStatus::Queued,
+                progress: DownloadProgress::default(),
+                metadata: request.metadata.clone(),
+                final_file_name: None,
+                final_file_path: None,
+                inspection: None,
+                error_message: None,
+                created_at: Local::now().to_rfc3339(),
+                completed_at: None,
+                intent: None,
+                recipe: None,
+                fingerprint: None,
+                explainable_result: None,
+                verification: None,
+                acquisition_plan: plan,
+                acquisition_request: Some(request.acquisition.clone()),
+            };
+            if let Some(store) = &self.job_store {
+                store.save(&queued)?;
             }
+            self.pending_queue.lock().await.push_back((id, request));
+            return Ok(queued);
+        }
+        for tool in required_tools(&plan)? {
+            self.tool_resolver.resolve_tool_with_settings(tool, Some(&current_settings))
+                .await.ok_or_else(|| format!("Required tool {tool} is unavailable. Install or repair it before downloading."))?;
         }
 
-        // 2. Validate URL and Output Directory
-        let valid_url = validate_media_url(&request.url).map_err(|e| e.to_string())?;
-        let output_dir_path =
-            validate_and_ensure_directory(&request.output_directory).map_err(|e| e.to_string())?;
+        let valid_url = validate_media_url_network(&request.metadata.webpage_url)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut output_dir_path =
+            validate_and_ensure_directory(&request.acquisition.output_directory)
+                .map_err(|e| e.to_string())?;
 
-        // 3. Resolve yt-dlp tool
         let ytdlp_tool = self
             .tool_resolver
-            .resolve_tool("yt-dlp")
+            .resolve_tool_with_settings("yt-dlp", Some(&current_settings))
             .await
             .ok_or_else(|| "yt-dlp executable not found".to_string())?;
 
-        let current_settings = self.settings.get_settings();
-        let compiled = compile_download_args(
-            request.preset,
-            &request.quality,
-            &output_dir_path.to_string_lossy(),
-            &valid_url,
-            &current_settings,
+        let mut acquisition = request.acquisition.clone();
+        acquisition.output_directory = output_dir_path.to_string_lossy().to_string();
+        let sidecar = matches!(
+            plan.operation,
+            AcquisitionOperation::ThumbnailOnly | AcquisitionOperation::SubtitlesOnly
         );
+        {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos();
+            output_dir_path = output_dir_path.join(format!("{}-{unique}", plan.id));
+            std::fs::create_dir(&output_dir_path).map_err(|e| e.to_string())?;
+            acquisition.output_directory = output_dir_path.to_string_lossy().into_owned();
+        }
+        let compiled = compile_acquisition_args(
+            &plan,
+            &crate::execution::ExecutionContext::new(
+                &acquisition.output_directory,
+                &current_settings,
+            ),
+        )?;
 
-        let job_id = format!("job-{}", Local::now().timestamp_millis());
+        let job_id = queued_job_id.unwrap_or_else(|| {
+            format!(
+                "job-{}-{}",
+                Local::now().timestamp_millis(),
+                std::process::id()
+            )
+        });
         let now_str = Local::now().to_rfc3339();
 
         let initial_job = DownloadJob {
             id: job_id.clone(),
             url: valid_url.clone(),
-            preset: request.preset,
-            quality: request.quality.clone(),
             output_directory: output_dir_path.to_string_lossy().to_string(),
             status: DownloadStatus::Downloading,
             progress: DownloadProgress::default(),
@@ -104,46 +248,53 @@ impl DownloadManager {
             final_file_path: None,
             inspection: None,
             verification: None,
+            acquisition_plan: plan.clone(),
             error_message: None,
             created_at: now_str,
             completed_at: None,
-            subtitle_options: None,
-            sponsor_block_mode: Some(current_settings.sponsor_block_mode),
             intent: None,
             recipe: None,
             fingerprint: None,
             explainable_result: None,
+            acquisition_request: Some(acquisition.clone()),
         };
-
-        // Store initial job in state
-        *self.active_job.write().await = Some(initial_job.clone());
 
         self.diagnostics.log(
             "INFO",
             "DOWNLOAD_MANAGER",
-            &format!("Starting download for '{}' using preset {:?}", request.metadata.title, request.preset),
+            &format!(
+                "Starting download for '{}' using acquisition plan {}",
+                request.metadata.title, plan.id
+            ),
         );
 
-        let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
+        let (line_tx, mut line_rx) = mpsc::channel::<String>(OUTPUT_CHANNEL_CAPACITY);
         let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
 
         let mut final_args = compiled.arguments.clone();
-        if let Some(ffmpeg_tool) = self.tool_resolver.resolve_tool("ffmpeg").await {
+        if let Some(ffmpeg_tool) = self
+            .tool_resolver
+            .resolve_tool_with_settings("ffmpeg", Some(&current_settings))
+            .await
+        {
             final_args.push("--ffmpeg-location".to_string());
             final_args.push(ffmpeg_tool.path.to_string_lossy().to_string());
         }
 
         // Spawn process runner
-        let mut proc_handle = ProcessHandle::spawn_with_streaming(
-            &ytdlp_tool.path,
-            &final_args,
-            line_tx,
-        )
-        .await
-        .map_err(|e| {
-            self.diagnostics.log("ERROR", "PROCESS", &e);
-            e
-        })?;
+        let mut proc_handle =
+            ProcessHandle::spawn_with_streaming(&ytdlp_tool.path, &final_args, line_tx)
+                .await
+                .inspect_err(|e| {
+                    self.diagnostics.log("ERROR", "PROCESS", e);
+                })?;
+
+        // Persist only sanitized data; raw input remains scoped to this process run.
+        if let Some(store) = &self.job_store {
+            store.save(&initial_job)?;
+        }
+        // Publish the reserved slot only after the process was spawned successfully.
+        *self.active_job.write().await = Some(initial_job.clone());
 
         // Save active handle
         *self.active_handle.lock().await = Some(ActiveJobHandle {
@@ -158,6 +309,9 @@ impl DownloadManager {
         let active_handle_clone = self.active_handle.clone();
         let media_id = request.metadata.id.clone();
         let is_lossy_warning = compiled.is_lossy_conversion;
+        let verification_settings = current_settings.clone();
+        let job_store = self.job_store.clone();
+        let queue_manager = self.clone();
 
         tokio::spawn(async move {
             let mut state_machine = DownloadStateMachine::with_state(DownloadStatus::Downloading);
@@ -235,7 +389,19 @@ impl DownloadManager {
                     }
 
                     // Resolve final file path
-                    let final_path = if let Some(dest) = captured_destination {
+                    let final_path = if sidecar {
+                        let filename =
+                            if matches!(plan.operation, AcquisitionOperation::ThumbnailOnly) {
+                                "artifact.jpg".to_string()
+                            } else {
+                                format!(
+                                    "artifact.{}.vtt",
+                                    plan.selected_streams.subtitle_languages[0]
+                                )
+                            };
+                        let path = output_dir_path.join(filename);
+                        path.is_file().then_some(path)
+                    } else if let Some(dest) = captured_destination {
                         let p = PathBuf::from(dest);
                         if p.exists() {
                             Some(p)
@@ -247,7 +413,55 @@ impl DownloadManager {
                     };
 
                     match final_path {
-                        Some(resolved_file) => {
+                        Some(mut resolved_file) => {
+                            if let Some(transform) = &compiled.finalize {
+                                if let Some(job) = active_job_clone.write().await.as_mut() {
+                                    job.status = DownloadStatus::PostProcessing;
+                                }
+                                let output = resolved_file.with_file_name(format!(
+                                    "{}.converted.{}",
+                                    resolved_file
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("media"),
+                                    transform.container
+                                ));
+                                let result = match tool_resolver_clone
+                                    .resolve_tool_with_settings(
+                                        "ffmpeg",
+                                        Some(&verification_settings),
+                                    )
+                                    .await
+                                {
+                                    Some(tool) => {
+                                        run_final_transform(
+                                            &tool.path,
+                                            &transform.arguments(&resolved_file, &output),
+                                            &mut cancel_rx,
+                                            &diagnostics_clone,
+                                        )
+                                        .await
+                                    }
+                                    None => Err("Required FFmpeg became unavailable".into()),
+                                };
+                                if let Err(error) = result {
+                                    if let Some(job) = active_job_clone.write().await.as_mut() {
+                                        job.status = if error == "Cancelled" {
+                                            DownloadStatus::Cancelled
+                                        } else {
+                                            DownloadStatus::Failed
+                                        };
+                                        job.error_message = Some(error);
+                                        job.completed_at = Some(Local::now().to_rfc3339());
+                                    }
+                                    *active_handle_clone.lock().await = None;
+                                    return;
+                                }
+                                resolved_file = output;
+                                if let Some(job) = active_job_clone.write().await.as_mut() {
+                                    job.status = DownloadStatus::Verifying;
+                                }
+                            }
                             diagnostics_clone.log(
                                 "INFO",
                                 "VERIFY",
@@ -261,18 +475,24 @@ impl DownloadManager {
                                 .to_string();
 
                             // Run media inspection through ffprobe/mediainfo
-                            let inspection_result = verify_and_inspect_media(
-                                &resolved_file,
-                                &tool_resolver_clone,
-                                is_lossy_warning,
-                            )
-                            .await;
+                            let ffprobe_tool = tool_resolver_clone
+                                .resolve_tool_with_settings("ffprobe", Some(&verification_settings))
+                                .await;
+                            let inspection_result =
+                                if matches!(plan.operation, AcquisitionOperation::SubtitlesOnly) {
+                                    crate::media_verifier::verify_subtitle(&resolved_file).await
+                                } else {
+                                    verify_and_inspect_media(
+                                        &resolved_file,
+                                        ffprobe_tool.as_ref().map(|tool| tool.path.as_path()),
+                                        is_lossy_warning,
+                                    )
+                                    .await
+                                };
 
                             match inspection_result {
                                 Ok(inspection) => {
-                                    let _ = state_machine.transition(DownloadStatus::Completed);
                                     if let Some(ref mut job) = *active_job_clone.write().await {
-                                        job.status = DownloadStatus::Completed;
                                         job.final_file_name = Some(fname);
                                         job.final_file_path =
                                             Some(resolved_file.to_string_lossy().to_string());
@@ -280,7 +500,6 @@ impl DownloadManager {
                                         job.progress.percentage = 100.0;
                                         job.completed_at = Some(Local::now().to_rfc3339());
 
-                                        // 1. Generate Media Fingerprint
                                         let fp = crate::fingerprint::FingerprintEngine::generate(
                                             &job.metadata,
                                             Some(&inspection),
@@ -288,7 +507,6 @@ impl DownloadManager {
                                         );
                                         job.fingerprint = Some(fp);
 
-                                        // 2. Generate Verification & Explainable Result
                                         let (verif, expl) = crate::media_verifier::generate_verification_and_explanation(
                                             job,
                                             &inspection,
@@ -297,17 +515,42 @@ impl DownloadManager {
                                         job.verification = Some(verif);
                                         job.explainable_result = Some(expl);
 
-                                        // 3. Create Reproducible Download Recipe
                                         let recipe = crate::recipe::RecipeEngine::create_recipe(
                                             job,
                                             job.verification.as_ref().map(|v| v.checklist.clone()),
                                         );
+                                        if let Some(explanation) = job.explainable_result.as_mut() {
+                                            explanation.recipe_id = Some(recipe.id.clone());
+                                        }
                                         job.recipe = Some(recipe);
+
+                                        if job.verification.as_ref().is_some_and(|v| v.is_valid) {
+                                            let _ =
+                                                state_machine.transition(DownloadStatus::Completed);
+                                            job.status = DownloadStatus::Completed;
+                                        } else {
+                                            let _ =
+                                                state_machine.transition(DownloadStatus::Failed);
+                                            job.status = DownloadStatus::Failed;
+                                            job.error_message = Some(
+                                                "Deep media verification did not pass. The output was retained for inspection."
+                                                    .to_string(),
+                                            );
+                                        }
                                     }
+                                    let final_status = active_job_clone
+                                        .read()
+                                        .await
+                                        .as_ref()
+                                        .map(|job| job.status);
                                     diagnostics_clone.log(
-                                        "INFO",
+                                        if final_status == Some(DownloadStatus::Completed) { "INFO" } else { "ERROR" },
                                         "DOWNLOAD_MANAGER",
-                                        "Download, verification, fingerprinting, and recipe generation completed successfully.",
+                                        if final_status == Some(DownloadStatus::Completed) {
+                                            "Download, verification, fingerprinting, and recipe generation completed successfully."
+                                        } else {
+                                            "Download finished, but deep media verification did not pass."
+                                        },
                                     );
                                 }
                                 Err(verify_err) => {
@@ -344,29 +587,444 @@ impl DownloadManager {
                 }
             }
 
+            if let (Some(store), Some(job)) = (job_store, active_job_clone.read().await.clone()) {
+                if let Err(error) = store.save(&job) {
+                    diagnostics_clone.log("ERROR", "PERSISTENCE", &error);
+                }
+            }
             *active_handle_clone.lock().await = None;
+            queue_manager.schedule_queue_drain();
         });
 
         Ok(initial_job)
     }
 
-    pub async fn cancel_download(&self, job_id: &str) -> Result<DownloadJob, String> {
-        let handle_guard = self.active_handle.lock().await;
-        if let Some(handle) = handle_guard.as_ref() {
-            if handle.job_id == job_id {
-                let _ = handle.cancel_sender.send(()).await;
+    fn schedule_queue_drain(&self) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            manager.start_next_queued().await;
+        });
+    }
+
+    async fn start_next_queued(&self) {
+        loop {
+            let next = self.pending_queue.lock().await.pop_front();
+            let Some((job_id, request)) = next else {
+                return;
+            };
+            if let Err(error) = self
+                .start_download_with_id(request, Some(job_id.clone()))
+                .await
+            {
+                if let Some(store) = &self.job_store {
+                    if let Ok(Some(mut job)) = store
+                        .list(500)
+                        .map(|jobs| jobs.into_iter().find(|job| job.id == job_id))
+                    {
+                        job.status = DownloadStatus::Failed;
+                        job.error_message =
+                            Some(format!("Queued download could not start: {error}"));
+                        job.completed_at = Some(Local::now().to_rfc3339());
+                        let _ = store.save(&job);
+                    }
+                }
+                self.diagnostics.log(
+                    "ERROR",
+                    "QUEUE",
+                    "A queued download could not start; see its history record for details.",
+                );
+            } else {
+                return;
             }
+        }
+    }
+
+    pub async fn cancel_download(&self, job_id: &str) -> Result<DownloadJob, String> {
+        {
+            let mut queue = self.pending_queue.lock().await;
+            if let Some(index) = queue.iter().position(|(id, _)| id == job_id) {
+                queue.remove(index);
+                let store = self
+                    .job_store
+                    .as_ref()
+                    .ok_or("Persistent history is unavailable")?;
+                let mut job = store
+                    .list(500)?
+                    .into_iter()
+                    .find(|job| job.id == job_id)
+                    .ok_or("Queued job record is missing")?;
+                job.status = DownloadStatus::Cancelled;
+                job.completed_at = Some(Local::now().to_rfc3339());
+                job.error_message = Some("Cancelled while waiting in the download queue.".into());
+                store.save(&job)?;
+                return Ok(job);
+            }
+        }
+        let cancellation_sent = {
+            let handle_guard = self.active_handle.lock().await;
+            if let Some(handle) = handle_guard.as_ref() {
+                handle.job_id == job_id && handle.cancel_sender.send(()).await.is_ok()
+            } else {
+                false
+            }
+        };
+
+        if !cancellation_sent {
+            return Err(format!(
+                "No running download job found with ID '{}'",
+                job_id
+            ));
         }
 
         if let Some(mut job) = self.get_active_job().await {
             if job.id == job_id {
-                job.status = DownloadStatus::Cancelled;
-                job.completed_at = Some(Local::now().to_rfc3339());
+                job.status = DownloadStatus::Cancelling;
+                job.completed_at = None;
                 *self.active_job.write().await = Some(job.clone());
                 return Ok(job);
             }
         }
 
         Err(format!("No active download job found with ID '{}'", job_id))
+    }
+}
+
+async fn run_final_transform(
+    ffmpeg: &std::path::Path,
+    args: &[String],
+    cancel_rx: &mut mpsc::Receiver<()>,
+    diagnostics: &DiagnosticsBuffer,
+) -> Result<(), String> {
+    if cancel_rx.try_recv().is_ok() {
+        return Err("Cancelled".into());
+    }
+    let (tx, mut rx) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
+    let mut process = ProcessHandle::spawn_with_streaming(ffmpeg, args, tx).await?;
+    loop {
+        tokio::select! {
+            _ = cancel_rx.recv() => { process.kill_tree().await; return Err("Cancelled".into()); }
+            line = rx.recv() => match line {
+                Some(line) => diagnostics.log("DEBUG", "FFMPEG", &line),
+                None => break,
+            }
+        }
+    }
+    if process.wait_for_exit().await? {
+        Ok(())
+    } else {
+        Err("Planned FFmpeg transformation failed; source retained.".into())
+    }
+}
+
+fn required_tools(plan: &crate::types::AcquisitionPlan) -> Result<Vec<&'static str>, String> {
+    plan.requirements
+        .iter()
+        .map(|requirement| match requirement.code.as_str() {
+            "YT_DLP" => Ok("yt-dlp"),
+            "FFMPEG" => Ok("ffmpeg"),
+            "FFPROBE" => Ok("ffprobe"),
+            code => Err(format!("Unsupported plan requirement: {code}")),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use crate::tool_manager::ToolManager;
+    use crate::types::{
+        AcquisitionRequest, DuplicatePolicy, MediaFormatSpec, MediaKind, MediaMetadata,
+        OutputProfile, SourceScope, TrackSelection,
+    };
+
+    fn test_job() -> DownloadJob {
+        let metadata = MediaMetadata {
+            id: "media".to_string(),
+            title: "Media".to_string(),
+            uploader: None,
+            uploader_avatar: None,
+            channel_id: None,
+            uploader_url: None,
+            duration: Some(1.0),
+            thumbnail: None,
+            webpage_url: "http://93.184.216.34/media".to_string(),
+            media_kind: MediaKind::Video,
+            upload_date: None,
+            release_timestamp: None,
+            view_count: None,
+            like_count: None,
+            description: None,
+            categories: None,
+            tags: None,
+            language: None,
+            is_live: Some(false),
+            was_live: Some(false),
+            extractor: None,
+            extractor_key: None,
+            playlist_title: None,
+            playlist_index: None,
+            playlist_count: None,
+            available_resolutions: vec![720],
+            available_frame_rates: vec![30],
+            has_video: true,
+            has_audio: true,
+            is_hdr: None,
+            subtitles: None,
+            automatic_captions: None,
+            chapters: None,
+            formats: Some(vec![MediaFormatSpec {
+                language: None,
+                format_id: "combined".to_string(),
+                ext: "mp4".to_string(),
+                resolution: Some("1280x720".to_string()),
+                width: Some(1280),
+                height: Some(720),
+                fps: Some(30.0),
+                vcodec: Some("avc1.64001f".to_string()),
+                acodec: Some("mp4a.40.2".to_string()),
+                filesize: Some(1_000_000),
+                filesize_approx: None,
+                tbr: Some(1000.0),
+                vbr: Some(900.0),
+                abr: Some(128.0),
+                hdr: Some(false),
+                dynamic_range: None,
+                audio_sample_rate: Some(48_000),
+                audio_channels: Some(2),
+            }]),
+            smart_recommendation: None,
+            source_type: None,
+            strategy: None,
+            transcoding_cost: None,
+            transcoding_explanation: None,
+            capabilities: None,
+        };
+        let acquisition = AcquisitionRequest {
+            source_scope: SourceScope::SingleMedia,
+            operation: AcquisitionOperation::EntireMedia,
+            output_profile: OutputProfile::Universal,
+            track_selection: TrackSelection::default(),
+            metadata_patch: None,
+            duplicate_policy: DuplicatePolicy::Rename,
+            output_directory: "/tmp".to_string(),
+            max_video_height: None,
+        };
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &metadata,
+            metadata.source_type.unwrap_or_default(),
+        );
+        let acquisition_plan = AcquisitionPlanner::plan(&graph, &acquisition).unwrap();
+
+        DownloadJob {
+            id: "job-cancel-test".to_string(),
+            url: "https://example.com/media".to_string(),
+            output_directory: "/tmp".to_string(),
+            status: DownloadStatus::Downloading,
+            progress: DownloadProgress::default(),
+            metadata,
+            final_file_name: None,
+            final_file_path: None,
+            inspection: None,
+            error_message: None,
+            created_at: "now".to_string(),
+            completed_at: None,
+            intent: None,
+            recipe: None,
+            fingerprint: None,
+            explainable_result: None,
+            verification: None,
+            acquisition_plan,
+            acquisition_request: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_reports_cancelling_until_worker_terminates_process() {
+        let manager = DownloadManager::new(
+            Arc::new(ToolResolver::new()),
+            Arc::new(DiagnosticsBuffer::new()),
+            Arc::new(SettingsManager::new()),
+        );
+        *manager.active_job.write().await = Some(test_job());
+        let (sender, mut receiver) = mpsc::channel(1);
+        *manager.active_handle.lock().await = Some(ActiveJobHandle {
+            job_id: "job-cancel-test".to_string(),
+            cancel_sender: sender,
+        });
+
+        let returned = manager.cancel_download("job-cancel-test").await.unwrap();
+        assert_eq!(returned.status, DownloadStatus::Cancelling);
+        assert!(returned.completed_at.is_none());
+        assert_eq!(receiver.recv().await, Some(()));
+    }
+
+    #[tokio::test]
+    async fn queued_jobs_can_be_cancelled_without_running() {
+        let manager = DownloadManager::new(
+            Arc::new(ToolResolver::new()),
+            Arc::new(DiagnosticsBuffer::new()),
+            Arc::new(SettingsManager::new()),
+        )
+        .with_job_store(Arc::new(
+            crate::persistence::JobStore::open_in_memory().unwrap(),
+        ));
+        let mut queued = test_job();
+        queued.id = "job-queued-cancel".into();
+        queued.status = DownloadStatus::Queued;
+        manager.job_store.as_ref().unwrap().save(&queued).unwrap();
+        manager.pending_queue.lock().await.push_back((
+            queued.id.clone(),
+            StartDownloadRequest {
+                expected_plan_id: queued.acquisition_plan.id.clone(),
+                metadata: queued.metadata.clone(),
+                acquisition: AcquisitionRequest {
+                    source_scope: SourceScope::SingleMedia,
+                    operation: AcquisitionOperation::EntireMedia,
+                    output_profile: OutputProfile::Universal,
+                    track_selection: TrackSelection::default(),
+                    metadata_patch: None,
+                    duplicate_policy: DuplicatePolicy::Rename,
+                    output_directory: "/tmp".into(),
+                    max_video_height: None,
+                },
+            },
+        ));
+        let cancelled = manager.cancel_download(&queued.id).await.unwrap();
+        assert_eq!(cancelled.status, DownloadStatus::Cancelled);
+        assert!(manager.pending_queue.lock().await.is_empty());
+        assert_eq!(
+            manager.list_jobs(10).unwrap()[0].status,
+            DownloadStatus::Cancelled
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn simultaneous_starts_queue_and_execute_sequentially() {
+        let tools_directory = tempfile::tempdir().unwrap();
+        let output_directory = tempfile::tempdir().unwrap();
+        let diagnostics = Arc::new(DiagnosticsBuffer::new());
+        let tool_manager = ToolManager::new(
+            Some(tools_directory.path().to_path_buf()),
+            diagnostics.clone(),
+        );
+        let fake_ytdlp = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2026.08.19; exit 0; fi\nsleep 0.1\nexit 1\n";
+        let source = tools_directory.path().join("source");
+        std::fs::write(&source, fake_ytdlp).unwrap();
+        let hash = ToolManager::compute_sha256(&source).unwrap();
+        tool_manager
+            .install_from_bytes("yt-dlp", fake_ytdlp, &hash, false)
+            .await
+            .unwrap();
+
+        let manager = Arc::new(
+            DownloadManager::new(
+                Arc::new(ToolResolver::with_manager(tool_manager)),
+                diagnostics,
+                Arc::new(SettingsManager::new()),
+            )
+            .with_job_store(Arc::new(
+                crate::persistence::JobStore::open_in_memory().unwrap(),
+            )),
+        );
+        let mut request = StartDownloadRequest {
+            expected_plan_id: String::new(),
+            metadata: test_job().metadata,
+            acquisition: AcquisitionRequest {
+                source_scope: SourceScope::SingleMedia,
+                operation: AcquisitionOperation::EntireMedia,
+                output_profile: OutputProfile::Universal,
+                track_selection: TrackSelection::default(),
+                metadata_patch: None,
+                duplicate_policy: DuplicatePolicy::Rename,
+                output_directory: output_directory.path().to_string_lossy().to_string(),
+                max_video_height: None,
+            },
+        };
+
+        let graph = crate::media_graph::MediaGraph::build_source_graph(
+            &request.metadata,
+            request.metadata.source_type.unwrap_or_default(),
+        );
+        request.expected_plan_id = AcquisitionPlanner::plan_with_policy(
+            &graph,
+            &request.acquisition,
+            (&manager.settings.get_settings()).into(),
+        )
+        .unwrap()
+        .id;
+        let mut stale_request = request.clone();
+        stale_request.expected_plan_id = "stale-plan".into();
+        assert!(manager
+            .start_download(stale_request)
+            .await
+            .unwrap_err()
+            .contains("plan changed"));
+        assert!(manager.get_active_job().await.is_none());
+        let first_manager = manager.clone();
+        let first_request = request.clone();
+        let second_manager = manager.clone();
+        let (first, second) = tokio::join!(
+            async move { first_manager.start_download(first_request).await },
+            async move { second_manager.start_download(request).await }
+        );
+
+        let (running, queued) = match (first.unwrap(), second.unwrap()) {
+            (left, right)
+                if left.status == DownloadStatus::Downloading
+                    && right.status == DownloadStatus::Queued =>
+            {
+                (left, right)
+            }
+            (left, right)
+                if right.status == DownloadStatus::Downloading
+                    && left.status == DownloadStatus::Queued =>
+            {
+                (right, left)
+            }
+            results => panic!("expected one running and one queued job, got {results:?}"),
+        };
+        assert_eq!(manager.list_jobs(10).unwrap().len(), 2);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let history = manager.list_jobs(10).unwrap();
+                let running_status = history
+                    .iter()
+                    .find(|job| job.id == running.id)
+                    .map(|job| job.status);
+                let queued_status = history
+                    .iter()
+                    .find(|job| job.id == queued.id)
+                    .map(|job| job.status);
+                if running_status == Some(DownloadStatus::Failed)
+                    && queued_status == Some(DownloadStatus::Failed)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let retried = manager.retry_job(&queued.id).await.unwrap();
+        assert_ne!(retried.id, queued.id);
+        assert_eq!(retried.status, DownloadStatus::Downloading);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if manager
+                    .list_jobs(10)
+                    .unwrap()
+                    .iter()
+                    .any(|job| job.id == retried.id && job.status == DownloadStatus::Failed)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }

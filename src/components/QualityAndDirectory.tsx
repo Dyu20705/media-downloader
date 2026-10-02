@@ -1,28 +1,26 @@
 import React from 'react';
 import { FolderOpen } from 'lucide-react';
-import { PresetType } from '../types';
+import { AcquisitionOperation } from '../types';
 import { ipc } from '../services/ipc';
 
 interface QualityAndDirectoryProps {
-  selectedPreset: PresetType;
+  operation: AcquisitionOperation;
   selectedQuality: string;
   onSelectQuality: (quality: string) => void;
   outputDirectory: string;
   onChangeOutputDirectory: (dir: string) => void;
-  availableResolutions: number[];
   disabled?: boolean;
 }
 
 export const QualityAndDirectory: React.FC<QualityAndDirectoryProps> = ({
-  selectedPreset,
+  operation,
   selectedQuality,
   onSelectQuality,
   outputDirectory,
   onChangeOutputDirectory,
-  availableResolutions,
   disabled = false
 }) => {
-  const isAudioPreset = selectedPreset === 'best-audio' || selectedPreset === 'mp3' || selectedPreset === 'flac';
+  const isAudioOperation = operation.type === 'AUDIO_ONLY';
 
   const handleBrowse = async () => {
     try {
@@ -50,11 +48,11 @@ export const QualityAndDirectory: React.FC<QualityAndDirectoryProps> = ({
             id="select-media-quality"
             value={selectedQuality}
             onChange={(e) => onSelectQuality(e.target.value)}
-            disabled={disabled || isAudioPreset}
+            disabled={disabled || isAudioOperation}
             aria-label="Target Video Quality"
             className="w-full px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 focus:border-blue-500 rounded-xl text-zinc-100 text-sm appearance-none cursor-pointer focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isAudioPreset ? (
+            {isAudioOperation ? (
               <option value="auto">Best Available Audio Bitrate</option>
             ) : (
               <>

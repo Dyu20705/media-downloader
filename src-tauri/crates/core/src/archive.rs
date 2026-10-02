@@ -10,7 +10,10 @@ impl ArchiveManager {
         Self { policy }
     }
 
-    pub fn generate_nfo_metadata(recipe: &DownloadRecipe, fingerprint: &MediaFingerprint) -> String {
+    pub fn generate_nfo_metadata(
+        recipe: &DownloadRecipe,
+        fingerprint: &MediaFingerprint,
+    ) -> String {
         format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
             <episodedetails>\n  \

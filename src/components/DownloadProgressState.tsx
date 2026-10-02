@@ -1,14 +1,10 @@
 import React from 'react';
 import { 
-  CheckCircle2, 
   XCircle, 
   Loader2, 
-  FolderOpen, 
-  Play, 
   Ban, 
   RotateCcw,
   Info,
-  ShieldCheck
 } from 'lucide-react';
 import { DownloadJob } from '../types';
 import { ipc } from '../services/ipc';
@@ -16,7 +12,6 @@ import { AcquisitionReceipt } from './AcquisitionReceipt';
 
 interface DownloadProgressStateProps {
   isAnalyzing: boolean;
-  hasUrl: boolean;
   hasMetadata: boolean;
   activeJob: DownloadJob | null;
   onStartDownload: () => void;
@@ -24,11 +19,11 @@ interface DownloadProgressStateProps {
   onReset: () => void;
   onOpenDetails: (job: DownloadJob) => void;
   onOpenDiagnostics: () => void;
+  planReady?: boolean;
 }
 
 export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
   isAnalyzing,
-  hasUrl,
   hasMetadata,
   activeJob,
   onStartDownload,
@@ -36,6 +31,7 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
   onReset,
   onOpenDetails,
   onOpenDiagnostics,
+  planReady = true,
 }) => {
   const handleOpenFile = async () => {
     if (activeJob?.finalFilePath) {
@@ -49,7 +45,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     }
   };
 
-  // 1. If currently analyzing
   if (isAnalyzing) {
     return (
       <div 
@@ -65,11 +60,9 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     );
   }
 
-  // 2. If active job exists
   if (activeJob) {
-    const { status, progress, finalFileName } = activeJob;
+    const { status, progress } = activeJob;
 
-    // COMPLETED
     if (status === 'COMPLETED') {
       return (
         <div className="space-y-4">
@@ -103,7 +96,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
       );
     }
 
-    // FAILED
     if (status === 'FAILED') {
       return (
         <div 
@@ -116,12 +108,22 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
             <span>Download failed</span>
           </div>
 
+          {activeJob.errorMessage && (
+            <p className="text-xs leading-relaxed text-red-200/90">
+              {activeJob.errorMessage}
+            </p>
+          )}
+          {activeJob.inspection && activeJob.verification && (
+            <AcquisitionReceipt job={activeJob} onOpenFile={handleOpenFile} onOpenDirectory={handleOpenFolder} />
+          )}
+
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
               id="btn-try-again-failed"
               onClick={onStartDownload}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+              disabled={!planReady}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Try again</span>
@@ -135,6 +137,16 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
             >
               <span>Details</span>
             </button>
+
+            {activeJob.inspection && (
+              <button
+                type="button"
+                onClick={() => onOpenDetails(activeJob)}
+                className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-xl border border-zinc-700 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+              >
+                Technical inspection
+              </button>
+            )}
           </div>
         </div>
       );
@@ -157,7 +169,8 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
             type="button"
             id="btn-try-again-cancelled"
             onClick={onStartDownload}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
+            disabled={!planReady}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Try again</span>
@@ -222,7 +235,6 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
     );
   }
 
-  // 3. If ready to download (metadata parsed)
   if (hasMetadata) {
     return (
       <div className="space-y-3">
@@ -230,18 +242,18 @@ export const DownloadProgressState: React.FC<DownloadProgressStateProps> = ({
           type="button"
           id="btn-primary-download"
           onClick={onStartDownload}
-          className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-base rounded-xl shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer flex items-center justify-center gap-2"
+          disabled={!planReady}
+          className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-semibold text-base rounded-xl shadow-sm transition-all focus-visible:ring-2 focus-visible:ring-blue-400 cursor-pointer flex items-center justify-center gap-2"
         >
           <span>Download</span>
         </button>
         <p className="text-center text-xs text-zinc-400" role="status">
-          Ready to download
+          {planReady ? 'Plan ready · review the source and planned output above' : 'Waiting for a valid download plan'}
         </p>
       </div>
     );
   }
 
-  // 4. Initial EMPTY State
   return (
     <div className="py-6 text-center text-xs text-zinc-400" role="status">
       Paste a media URL to get started

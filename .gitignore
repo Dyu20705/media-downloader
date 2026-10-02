@@ -31,12 +31,14 @@ temp_downloads/
 *.wav
 *.mkv
 *.ts
+!vite.config.ts
+!src/**/*.ts
 
 # Bundles and release packages
 *.AppImage
 *.zip
-One-Click-Media-Downloader-Linux/
-One-Click-Media-Downloader-Linux.zip
+opendownloader-linux/
+opendownloader-linux.zip
 release/
 
 # Temporary files & logs
@@ -47,4 +49,3 @@ release/
 Thumbs.db
 .env
 !.env.example
-

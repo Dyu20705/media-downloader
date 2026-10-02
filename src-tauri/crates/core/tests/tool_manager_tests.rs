@@ -1,35 +1,32 @@
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::PathBuf;
+use std::fs;
 use std::sync::Arc;
 use tempfile::tempdir;
 
-use ocmd_core::diagnostics::DiagnosticsBuffer;
-use ocmd_core::tool_manager::{
-    get_pinned_tool_spec, ToolManager, PINNED_TOOLS,
-};
-use ocmd_core::types::{AppSettings, ToolStatus};
+use opendownloader_core::diagnostics::DiagnosticsBuffer;
+use opendownloader_core::tool_manager::{get_pinned_tool_spec, ToolManager, PINNED_TOOLS};
+#[cfg(unix)]
+use opendownloader_core::types::{AppSettings, ToolStatus};
 
 #[test]
 fn test_pinned_versions_catalog() {
     assert_eq!(PINNED_TOOLS.len(), 4);
 
     let ytdlp = get_pinned_tool_spec("yt-dlp").expect("yt-dlp must be pinned");
-    assert_eq!(ytdlp.pinned_version, "2025.02.19");
+    assert_eq!(ytdlp.pinned_version, "2026.08.19");
     assert!(ytdlp.is_required);
     assert_eq!(ytdlp.license, "Unlicense");
 
     let ffmpeg = get_pinned_tool_spec("ffmpeg").expect("ffmpeg must be pinned");
-    assert_eq!(ffmpeg.pinned_version, "7.1");
+    assert_eq!(ffmpeg.pinned_version, "9.0.2");
     assert!(ffmpeg.is_required);
     assert!(ffmpeg.license.contains("GPL"));
 
     let ffprobe = get_pinned_tool_spec("ffprobe").expect("ffprobe must be pinned");
-    assert_eq!(ffprobe.pinned_version, "7.1");
+    assert_eq!(ffprobe.pinned_version, "9.0.2");
     assert!(ffprobe.is_required);
 
     let mediainfo = get_pinned_tool_spec("mediainfo").expect("mediainfo must be pinned");
-    assert_eq!(mediainfo.pinned_version, "24.12");
+    assert_eq!(mediainfo.pinned_version, "26.05");
     assert!(!mediainfo.is_required);
     assert_eq!(mediainfo.license, "BSD-2-Clause");
 }
@@ -40,7 +37,7 @@ fn test_checksum_verification_valid_and_tampered() {
     let file_path = dir.path().join("test_binary.bin");
 
     // Write deterministic content
-    let content = b"one-click-media-downloader-safe-executable-test";
+    let content = b"opendownloader-safe-executable-test";
     fs::write(&file_path, content).unwrap();
 
     let computed_hash = ToolManager::compute_sha256(&file_path).unwrap();
@@ -57,6 +54,7 @@ fn test_checksum_verification_valid_and_tampered() {
     assert!(!ToolManager::verify_sha256(&file_path, tampered_hash).unwrap());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_installation_atomicity_and_staging_cleanup() {
     let tools_dir = tempdir().unwrap();
@@ -65,13 +63,16 @@ async fn test_installation_atomicity_and_staging_cleanup() {
 
     // Initial state before managed install must not be managed
     let status_before = manager.check_tool_status("yt-dlp", None).await;
-    assert!(!status_before.managed, "Tool should not be managed before install");
+    assert!(
+        !status_before.managed,
+        "Tool should not be managed before install"
+    );
 
     // Create a mock executable script/binary
     let mock_binary: &[u8] = if cfg!(windows) {
-        b"@echo off\r\necho 2025.02.19\r\n"
+        b"@echo off\r\necho 2026.08.19\r\n"
     } else {
-        b"#!/bin/sh\necho 2025.02.19\n"
+        b"#!/bin/sh\necho 2026.08.19\n"
     };
 
     let mock_hash = {
@@ -82,26 +83,36 @@ async fn test_installation_atomicity_and_staging_cleanup() {
     };
 
     // Install using atomic byte installer
-    let install_result = manager.install_from_bytes("yt-dlp", mock_binary, &mock_hash, false).await;
-    assert!(install_result.is_ok(), "Installation should succeed: {:?}", install_result.err());
+    let install_result = manager
+        .install_from_bytes("yt-dlp", mock_binary, &mock_hash, false)
+        .await;
+    assert!(
+        install_result.is_ok(),
+        "Installation should succeed: {:?}",
+        install_result.err()
+    );
 
     let status_after = install_result.unwrap();
     assert_eq!(status_after.status, ToolStatus::Ready);
     assert!(status_after.managed);
-    assert_eq!(status_after.pinned_version, "2025.02.19");
+    assert_eq!(status_after.pinned_version, "2026.08.19");
 
     // Verify staging directory is cleaned up
     let staging_dir = manager.get_staging_dir();
     if staging_dir.exists() {
         let entries: Vec<_> = fs::read_dir(&staging_dir).unwrap().collect();
-        assert_eq!(entries.len(), 0, "Staging directory must be empty after installation");
+        assert_eq!(
+            entries.len(),
+            0,
+            "Staging directory must be empty after installation"
+        );
     }
 
     // Verify manifest.json was atomically committed
     let manifest = manager.load_manifest();
     assert!(manifest.tools.contains_key("yt-dlp"));
     let entry = manifest.tools.get("yt-dlp").unwrap();
-    assert_eq!(entry.version, "2025.02.19");
+    assert_eq!(entry.version, "2026.08.19");
     assert!(entry.verified);
     assert_eq!(entry.sha256, mock_hash);
 }
@@ -116,15 +127,26 @@ async fn test_corrupted_binary_rejection_and_staging_safety() {
     let expected_hash = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
 
     // Attempt install with mismatching hash
-    let result = manager.install_from_bytes("yt-dlp", mock_binary, expected_hash, false).await;
-    assert!(result.is_err(), "Installation with wrong checksum must fail");
+    let result = manager
+        .install_from_bytes("yt-dlp", mock_binary, expected_hash, false)
+        .await;
+    assert!(
+        result.is_err(),
+        "Installation with wrong checksum must fail"
+    );
 
     // Verify corrupt file NEVER became active
     let manifest = manager.load_manifest();
-    assert!(!manifest.tools.contains_key("yt-dlp"), "Corrupt install must not be in manifest");
+    assert!(
+        !manifest.tools.contains_key("yt-dlp"),
+        "Corrupt install must not be in manifest"
+    );
 
     let status = manager.check_tool_status("yt-dlp", None).await;
-    assert!(!status.managed, "Corrupt binary must not be marked as managed");
+    assert!(
+        !status.managed,
+        "Corrupt binary must not be marked as managed"
+    );
 
     // Verify staging temp files are cleaned up
     let staging_dir = manager.get_staging_dir();
@@ -134,6 +156,7 @@ async fn test_corrupted_binary_rejection_and_staging_safety() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_resolution_order_priority() {
     let temp_tools = tempdir().unwrap();
@@ -142,13 +165,17 @@ async fn test_resolution_order_priority() {
 
     // 1. Test explicit configured path in AppSettings
     let explicit_dir = tempdir().unwrap();
-    let custom_exe_name = if cfg!(windows) { "custom_yt.exe" } else { "custom_yt" };
+    let custom_exe_name = if cfg!(windows) {
+        "custom_yt.exe"
+    } else {
+        "custom_yt"
+    };
     let custom_exe_path = explicit_dir.path().join(custom_exe_name);
 
     if cfg!(windows) {
-        fs::write(&custom_exe_path, b"@echo off\r\necho 2025.02.19\r\n").unwrap();
+        fs::write(&custom_exe_path, b"@echo off\r\necho 2026.08.19\r\n").unwrap();
     } else {
-        fs::write(&custom_exe_path, b"#!/bin/sh\necho 2025.02.19\n").unwrap();
+        fs::write(&custom_exe_path, b"#!/bin/sh\necho 2026.08.19\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -158,16 +185,107 @@ async fn test_resolution_order_priority() {
         }
     }
 
-    let mut settings = AppSettings::default();
-    settings.custom_ytdlp_path = Some(custom_exe_path.to_string_lossy().to_string());
+    let settings = AppSettings {
+        custom_ytdlp_path: Some(custom_exe_path.to_string_lossy().to_string()),
+        ..AppSettings::default()
+    };
 
     let resolved = manager.resolve_tool("yt-dlp", Some(&settings)).await;
     assert!(resolved.is_some());
     let tool = resolved.unwrap();
     assert_eq!(tool.path, custom_exe_path);
     assert!(!tool.is_managed, "Explicit path is not managed");
+
+    let second_path = explicit_dir.path().join(if cfg!(windows) {
+        "custom_yt_second.exe"
+    } else {
+        "custom_yt_second"
+    });
+    if cfg!(windows) {
+        fs::write(&second_path, b"@echo off\r\necho 2025.03.01\r\n").unwrap();
+    } else {
+        fs::write(&second_path, b"#!/bin/sh\necho 2025.03.01\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&second_path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&second_path, permissions).unwrap();
+        }
+    }
+    let changed_settings = AppSettings {
+        custom_ytdlp_path: Some(second_path.to_string_lossy().to_string()),
+        ..AppSettings::default()
+    };
+    let changed = manager
+        .resolve_tool("yt-dlp", Some(&changed_settings))
+        .await
+        .unwrap();
+    assert_eq!(
+        changed.path, second_path,
+        "custom settings must outrank cache"
+    );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn test_archive_derived_binary_tampering_is_rejected() {
+    let tools_dir = tempdir().unwrap();
+    let manager = ToolManager::new(
+        Some(tools_dir.path().to_path_buf()),
+        Arc::new(DiagnosticsBuffer::new()),
+    );
+    let original: &[u8] = if cfg!(windows) {
+        b"@echo off\r\necho ffmpeg version 9.0.2\r\n"
+    } else {
+        b"#!/bin/sh\necho 'ffmpeg version 9.0.2'\n"
+    };
+    let replacement: &[u8] = if cfg!(windows) {
+        b"@echo off\r\necho ffmpeg version 9.0.2 modified\r\n"
+    } else {
+        b"#!/bin/sh\necho 'ffmpeg version 9.0.2 modified'\n"
+    };
+    let hash = {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("ffmpeg");
+        fs::write(&path, original).unwrap();
+        ToolManager::compute_sha256(&path).unwrap()
+    };
+
+    manager
+        .install_from_bytes("ffmpeg", original, &hash, false)
+        .await
+        .unwrap();
+    let installed = manager
+        .get_version_dir("ffmpeg", "9.0.2")
+        .join(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        });
+    fs::write(&installed, replacement).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&installed).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&installed, permissions).unwrap();
+    }
+    manager.clear_cache();
+
+    let resolved = manager.resolve_tool("ffmpeg", None).await;
+    assert!(
+        resolved.as_ref().is_none_or(|tool| tool.path != installed),
+        "a checksum-mismatched managed executable must never be selected"
+    );
+    let status = manager.check_tool_status("ffmpeg", None).await;
+    assert_eq!(status.status, ToolStatus::Invalid);
+    assert!(status.managed);
+    let error = status.error_message.unwrap();
+    assert!(error.contains("damaged") || error.contains("checksum"));
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn test_reinstall_and_repair_flow() {
     let tools_dir = tempdir().unwrap();
@@ -175,9 +293,9 @@ async fn test_reinstall_and_repair_flow() {
     let manager = ToolManager::new(Some(tools_dir.path().to_path_buf()), diag);
 
     let mock_binary: &[u8] = if cfg!(windows) {
-        b"@echo off\r\necho 2025.02.19\r\n"
+        b"@echo off\r\necho 2026.08.19\r\n"
     } else {
-        b"#!/bin/sh\necho 2025.02.19\n"
+        b"#!/bin/sh\necho 2026.08.19\n"
     };
 
     let mock_hash = {
@@ -188,13 +306,20 @@ async fn test_reinstall_and_repair_flow() {
     };
 
     // Install initial version
-    manager.install_from_bytes("yt-dlp", mock_binary, &mock_hash, false).await.unwrap();
+    manager
+        .install_from_bytes("yt-dlp", mock_binary, &mock_hash, false)
+        .await
+        .unwrap();
     let status_1 = manager.check_tool_status("yt-dlp", None).await;
     assert_eq!(status_1.status, ToolStatus::Ready);
 
     // Corrupt active binary
-    let target_dir = manager.get_version_dir("yt-dlp", "2025.02.19");
-    let bin_name = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+    let target_dir = manager.get_version_dir("yt-dlp", "2026.08.19");
+    let bin_name = if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    };
     let active_bin = target_dir.join(bin_name);
     fs::write(&active_bin, b"invalid corrupted data").unwrap();
     manager.clear_cache();
@@ -205,8 +330,52 @@ async fn test_reinstall_and_repair_flow() {
     assert!(status_corrupted.error_message.is_some());
 
     // Repair tool
-    let repair_res = manager.install_from_bytes("yt-dlp", mock_binary, &mock_hash, false).await;
+    let repair_res = manager
+        .install_from_bytes("yt-dlp", mock_binary, &mock_hash, false)
+        .await;
     assert!(repair_res.is_ok());
     let status_repaired = manager.check_tool_status("yt-dlp", None).await;
     assert_eq!(status_repaired.status, ToolStatus::Ready);
+}
+
+#[test]
+fn test_manifest_can_be_replaced_repeatedly() {
+    let tools_dir = tempdir().unwrap();
+    let manager = ToolManager::new(
+        Some(tools_dir.path().to_path_buf()),
+        Arc::new(DiagnosticsBuffer::new()),
+    );
+
+    let mut manifest = manager.load_manifest();
+    manifest.schema_version = 1;
+    manifest.last_updated = "first".to_string();
+    manager.save_manifest_atomic(&manifest).unwrap();
+
+    manifest.schema_version = 2;
+    manifest.last_updated = "second".to_string();
+    manager.save_manifest_atomic(&manifest).unwrap();
+
+    let loaded = manager.load_manifest();
+    assert_eq!(loaded.schema_version, 2);
+    assert_eq!(loaded.last_updated, "second");
+}
+
+#[test]
+fn test_all_pinned_checksums_are_sha256_shaped() {
+    for spec in PINNED_TOOLS {
+        for artifact in spec.artifacts {
+            let checksum = artifact.sha256;
+            assert_eq!(
+                checksum.len(),
+                64,
+                "{} has a malformed SHA-256 pin",
+                spec.name
+            );
+            assert!(
+                checksum.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "{} has a non-hex SHA-256 pin",
+                spec.name
+            );
+        }
+    }
 }

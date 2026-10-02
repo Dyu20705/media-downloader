@@ -1,77 +1,44 @@
-# One-Click Media Downloader
+# openDownloader
 
-> Production-grade desktop media downloader powered by Tauri 2, Rust, React 18, yt-dlp, FFmpeg, and MediaInfo.
+openDownloader is a desktop application for inspecting a media URL, reviewing an acquisition plan, and downloading a single video, audio track, clip/chapter, thumbnail, or one subtitle language per job. It uses Tauri, Rust, React, and separately managed media tools.
 
----
+Repository: [github.com/Dyu20705/openDownloader](https://github.com/Dyu20705/openDownloader)
 
-## 🎬 Demo
+## Project status
 
-https://github.com/user-attachments/assets/f60b6308-8bd5-452e-88e6-eb7018b5772e
+v1.0.0 is the feature-complete release target. Active feature development is ending after v1.0.0, and the repository may be archived after release verification. No ongoing maintenance or security-response commitment is offered. Users may fork and maintain the project under its MIT License.
 
----
+## Support and limitations
 
-## Features
+The production package workflow targets 64-bit Windows, Linux, and Intel macOS. Managed media-tool availability is narrower than the desktop framework's possible platforms; consult [tool management](docs/tool-management.md) before relying on managed installs. Playlist URLs select one item by default; downloading a whole playlist is not supported. Custom output profiles and metadata-patch requests are unsupported. Media availability and formats depend on the source service and its terms.
 
-- **Simple & Intuitive Workflow**: Paste URL → Select Preset & Format → Choose Destination → Download.
-- **Automated Tool Management**: Self-manages and cryptographically verifies `yt-dlp`, `FFmpeg`, `FFprobe`, and `MediaInfo` binaries without modifying system PATH.
-- **Rich Format Presets**:
-  - **MP4 (Compatible)**: Universal H.264/AAC playback.
-  - **Best Video**: Highest available resolution (up to 4K/8K).
-  - **Best Audio**: Preserves the best available source audio stream when possible (for example Opus/AAC) without unnecessary re-encoding.
-  - **MP3**: Compatibility-focused MP3 output using the encoder's highest-quality VBR setting. This is a lossy transcode and cannot improve the source stream.
-  - **FLAC**: FLAC output for workflows that require the format. Converting a lossy source to FLAC does not restore information already lost in the source.
-- **Deep Media Verification**: Real-time post-download inspection ensuring valid video/audio streams, duration, bitrate, and headers.
-- **Secure by Design**: Isolated subprocess execution without shell interpolation, path traversal prevention, and strict sanitization.
+Downloads run through backend processes without shell interpolation. Media URL details are removed from diagnostics and persisted history is sanitized; history is stored locally in SQLite and is not encrypted. Managed tool downloads are checked against pinned SHA-256 values before installation. See [security](docs/security.md) and [privacy](PRIVACY.md).
 
----
+## Build from source
 
-## Tech Stack
+Prerequisites: Node.js 24, npm, Rust 1.96, and the [Tauri platform prerequisites](https://tauri.app/start/prerequisites/).
 
-- **Frontend**: React 18, TypeScript, Tailwind CSS, Vite, Lucide Icons.
-- **Desktop Host & Core Engine**: Tauri 2, Rust.
-
----
-
-## Getting Started
-
-### Prerequisites
-- Node.js 18+ & npm
-- Rust 1.75+
-
-### Development
-```bash
-# Install dependencies
-npm install
-
-# Run in development mode
+```sh
+npm ci
 npm run tauri dev
-```
-
-### Production Build
-```bash
-# Build desktop binary and installer
 npm run tauri build
 ```
 
----
+See [packaging](docs/packaging.md) for supported bundles and release status, and [troubleshooting](docs/troubleshooting.md) for user help.
 
-## Documentation
+## Maintained documentation
 
-- [Architecture Overview](docs/architecture.md)
-- [Universal Media Resolver](docs/universal-resolver.md)
-- [Quality Transparency & Download Plan](docs/quality-transparency.md)
-- [Tool Management & Supply Chain](docs/tool-management.md)
-- [Security & Hardening](docs/security.md)
-- [Performance & Benchmarks](docs/performance.md)
-- [Packaging & Windows Distribution](docs/packaging.md)
-- [Troubleshooting & Reliability](docs/troubleshooting.md)
-- [User Cheatsheet](docs/cheatsheet.md)
-
----
+- [Architecture](docs/architecture.md)
+- [Tool management](docs/tool-management.md)
+- [Security](docs/security.md)
+- [Privacy](PRIVACY.md)
+- [Performance](docs/performance.md)
+- [Packaging and releases](docs/packaging.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Changelog](CHANGELOG.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Security reporting](SECURITY.md)
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). Embedded external tools are distributed under their respective licenses:
-- `yt-dlp`: The Unlicense (Public Domain)
-- `FFmpeg` / `FFprobe`: GNU General Public License v3.0 / LGPL v2.1+
-- `MediaInfo`: BSD 2-Clause License
+The application is licensed under the [MIT License](LICENSE). Third-party tool licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

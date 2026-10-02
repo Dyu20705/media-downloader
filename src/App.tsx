@@ -1,12 +1,14 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { MediaEngineSetupCard } from './components/MediaEngineSetupCard';
 import { UrlInputBar } from './components/UrlInputBar';
 import { MediaSummaryCard } from './components/MediaSummaryCard';
 import { RecommendationCard } from './components/RecommendationCard';
-import { FormatSelector } from './components/FormatSelector';
+import { AcquisitionControls } from './components/AcquisitionControls';
 import { QualityAndDirectory } from './components/QualityAndDirectory';
 import { DownloadProgressState } from './components/DownloadProgressState';
+import { DownloadPlanCard } from './components/DownloadPlanCard';
+import { PlaylistIntentGuard } from './components/PlaylistIntentGuard';
 
 import { SettingsModal } from './components/SettingsModal';
 import { DownloadHistoryModal } from './components/DownloadHistoryModal';
@@ -22,31 +24,30 @@ import { useMediaAnalysis } from './hooks/useMediaAnalysis';
 import { useRecommendation } from './hooks/useRecommendation';
 import { useDownloadEngine } from './hooks/useDownloadEngine';
 import { useDiagnostics } from './hooks/useDiagnostics';
+import { useAcquisitionPlan } from './hooks/useAcquisitionPlan';
 
-import { DownloadJob } from './types';
+import { AcquisitionRequest, DownloadJob } from './types';
 import { ipc } from './services/ipc';
 
 export const App: React.FC = () => {
-  // 1. Modals state manager
   const modals = useModals();
 
-  // 2. Diagnostics state manager
   const { logs, fetchDiagnostics, clearDiagnostics } = useDiagnostics();
 
-  // 3. Application Settings manager
   const {
     settings,
     outputDirectory,
     setOutputDirectory,
-    preset,
-    setPreset,
+    operation,
+    setOperation,
+    outputProfile,
+    setOutputProfile,
     quality,
     setQuality,
     intent,
     saveSettings,
   } = useAppSettings();
 
-  // 4. Media Tools & Auto-Bootstrap Engine
   const {
     tools,
     toolStatuses,
@@ -58,7 +59,6 @@ export const App: React.FC = () => {
     installAllTools,
   } = useToolEngine();
 
-  // 5. Media URL & Metadata Analysis Engine
   const {
     url,
     setUrl,
@@ -70,7 +70,6 @@ export const App: React.FC = () => {
     handleAnalyze,
   } = useMediaAnalysis();
 
-  // 6. Dynamic Recommendation Engine
   const {
     currentRecommendation,
     isRecommendationApplied,
@@ -78,19 +77,21 @@ export const App: React.FC = () => {
   } = useRecommendation({
     metadata,
     intent,
-    preset,
+    operation,
+    outputProfile,
     quality,
-    setPreset,
+    setOperation,
+    setOutputProfile,
     setQuality,
   });
 
-  // 7. Active Download & Queue Lifecycle Engine
   const {
     activeJob,
     allJobs,
     isJobRunning,
     startDownload,
     cancelDownload,
+    retryDownload,
     resetActiveJob,
     downloadError,
   } = useDownloadEngine({ onDiagnosticsUpdate: fetchDiagnostics });
@@ -104,31 +105,54 @@ export const App: React.FC = () => {
   const hasOutdated = toolStatuses.some((t) => t.status === 'OUTDATED');
   const completedJobsCount = allJobs.filter((j) => j.status === 'COMPLETED').length;
 
-  const handleStartDownload = useCallback(() => {
-    if (!metadata || !url) return;
-    startDownload({
-      url,
-      metadata,
-      preset,
-      quality,
+  const [subtitleLanguage, setSubtitleLanguage] = useState('');
+  const [includeAutoSubtitles, setIncludeAutoSubtitles] = useState(false);
+  const buildAcquisitionRequest = useCallback((): AcquisitionRequest => {
+    const audioOnly = operation.type === 'AUDIO_ONLY';
+    const parsedHeight = Number.parseInt(quality, 10);
+    return {
+      sourceScope: 'SINGLE_MEDIA',
+      operation,
+      outputProfile,
+      trackSelection: {
+        audioLanguage: null,
+        subtitleLanguages: operation.type === 'SUBTITLES_ONLY' && subtitleLanguage ? [subtitleLanguage] : [],
+        includeAutoSubtitles: operation.type === 'SUBTITLES_ONLY' && includeAutoSubtitles,
+      },
+      metadataPatch: null,
+      duplicatePolicy: 'RENAME',
       outputDirectory,
+      maxVideoHeight: audioOnly || !Number.isFinite(parsedHeight) ? null : parsedHeight,
+    };
+  }, [operation, outputProfile, outputDirectory, quality, subtitleLanguage, includeAutoSubtitles]);
+
+  const acquisitionRequest = useMemo(
+    () => metadata ? buildAcquisitionRequest() : null,
+    [metadata, buildAcquisitionRequest],
+  );
+  const { plan, isPlanning, planningError } = useAcquisitionPlan(metadata, acquisitionRequest, settings);
+
+  const handleStartDownload = useCallback(() => {
+    if (!metadata || !url || !acquisitionRequest || !plan) return;
+    startDownload({
+      expectedPlanId: plan.id,
+      metadata,
+      acquisition: acquisitionRequest,
     });
-  }, [metadata, url, preset, quality, outputDirectory, startDownload]);
+  }, [metadata, url, acquisitionRequest, plan, startDownload]);
 
   const handleFetchCommandPreview = useCallback(async (): Promise<string> => {
     try {
       const res = await ipc.buildCommand({
-        preset,
-        quality,
-        outputDirectory,
-        url: url || 'URL',
+        metadata: metadata!,
+        acquisition: buildAcquisitionRequest(),
         settings,
       });
       return res.command;
     } catch {
       return 'yt-dlp [URL]';
     }
-  }, [preset, quality, outputDirectory, url, settings]);
+  }, [metadata, buildAcquisitionRequest, settings]);
 
   const handleOpenJobDetails = (job: DownloadJob) => {
     setSelectedJobForDetails(job);
@@ -222,11 +246,20 @@ export const App: React.FC = () => {
           </section>
         )}
 
-        {/* Format Selection Presets */}
-        <section aria-label="Format selection">
-          <FormatSelector
-            selectedPreset={preset}
-            onSelectPreset={setPreset}
+        {metadata && <PlaylistIntentGuard url={url} metadata={metadata} />}
+
+        {/* Orthogonal operation and output-profile selection */}
+        <section aria-label="Acquisition operation and output profile">
+          <AcquisitionControls
+            metadata={metadata}
+            subtitleLanguage={subtitleLanguage}
+            onSubtitleLanguage={setSubtitleLanguage}
+            includeAutoSubtitles={includeAutoSubtitles}
+            onIncludeAutoSubtitles={setIncludeAutoSubtitles}
+            operation={operation}
+            outputProfile={outputProfile}
+            onChangeOperation={setOperation}
+            onChangeOutputProfile={setOutputProfile}
             recommendation={currentRecommendation}
             disabled={isJobRunning}
           />
@@ -235,27 +268,37 @@ export const App: React.FC = () => {
         {/* Quality and Destination Folder */}
         <section aria-label="Quality and destination">
           <QualityAndDirectory
-            selectedPreset={preset}
+            operation={operation}
             selectedQuality={quality}
             onSelectQuality={setQuality}
             outputDirectory={outputDirectory}
             onChangeOutputDirectory={setOutputDirectory}
-            availableResolutions={metadata?.availableResolutions || []}
             disabled={isJobRunning}
           />
         </section>
+
+        {metadata && (
+          <section aria-label="Authoritative download plan">
+            <DownloadPlanCard
+              metadata={metadata}
+              plan={plan}
+              isPlanning={isPlanning}
+              error={planningError}
+            />
+          </section>
+        )}
 
         {/* Download Execution & Progress State */}
         <section aria-label="Execution controls" className="pt-2">
           {downloadError && (
             <div className="mb-3 p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-xs text-red-300">
               {downloadError.userMessage}
+              {downloadError.technicalDetails && <p className="mt-1 text-xs">{downloadError.technicalDetails}</p>}
             </div>
           )}
 
           <DownloadProgressState
             isAnalyzing={isAnalyzing}
-            hasUrl={Boolean(url)}
             hasMetadata={Boolean(metadata)}
             activeJob={activeJob}
             onStartDownload={handleStartDownload}
@@ -263,13 +306,14 @@ export const App: React.FC = () => {
             onReset={resetActiveJob}
             onOpenDetails={handleOpenJobDetails}
             onOpenDiagnostics={() => modals.setIsDiagnosticsOpen(true)}
+            planReady={Boolean(plan) && !isPlanning && !planningError}
           />
         </section>
       </main>
 
       {/* 3. Footer Bar */}
       <footer className="py-4 border-t border-zinc-900 text-center text-xs text-zinc-600 flex items-center justify-between px-6">
-        <span>One-Click Media Downloader</span>
+        <span>openDownloader</span>
         <span>Engine: yt-dlp + FFmpeg + MediaInfo</span>
       </footer>
 
@@ -286,6 +330,8 @@ export const App: React.FC = () => {
         onClose={() => modals.setIsHistoryOpen(false)}
         jobs={allJobs}
         onInspect={handleOpenJobDetails}
+        onRetry={(job) => { void retryDownload(job.id); modals.setIsHistoryOpen(false); }}
+        onCancel={(job) => { void cancelDownload(job.id); }}
       />
 
       <ToolsModal

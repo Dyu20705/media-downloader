@@ -1,5 +1,5 @@
-use thiserror::Error;
 use crate::types::DownloadStatus;
+use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum StateMachineError {
@@ -13,6 +13,12 @@ pub enum StateMachineError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DownloadStateMachine {
     current: DownloadStatus,
+}
+
+impl Default for DownloadStateMachine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DownloadStateMachine {
@@ -48,9 +54,23 @@ impl DownloadStateMachine {
         }
 
         match from {
+            DownloadStatus::Queued => matches!(
+                to,
+                DownloadStatus::Preparing
+                    | DownloadStatus::Downloading
+                    | DownloadStatus::Failed
+                    | DownloadStatus::Cancelled
+            ),
+            DownloadStatus::Preparing => matches!(
+                to,
+                DownloadStatus::Downloading | DownloadStatus::Failed | DownloadStatus::Cancelling
+            ),
             DownloadStatus::Idle => matches!(
                 to,
-                DownloadStatus::Analyzing | DownloadStatus::Ready | DownloadStatus::Downloading
+                DownloadStatus::Analyzing
+                    | DownloadStatus::Ready
+                    | DownloadStatus::Queued
+                    | DownloadStatus::Downloading
             ),
             DownloadStatus::Analyzing => matches!(
                 to,
@@ -69,9 +89,7 @@ impl DownloadStateMachine {
             ),
             DownloadStatus::PostProcessing => matches!(
                 to,
-                DownloadStatus::Verifying
-                    | DownloadStatus::Failed
-                    | DownloadStatus::Cancelling
+                DownloadStatus::Verifying | DownloadStatus::Failed | DownloadStatus::Cancelling
             ),
             DownloadStatus::Verifying => {
                 matches!(to, DownloadStatus::Completed | DownloadStatus::Failed)
@@ -79,6 +97,13 @@ impl DownloadStateMachine {
             DownloadStatus::Cancelling => {
                 matches!(to, DownloadStatus::Cancelled | DownloadStatus::Failed)
             }
+            DownloadStatus::Interrupted => matches!(
+                to,
+                DownloadStatus::Queued
+                    | DownloadStatus::Analyzing
+                    | DownloadStatus::Ready
+                    | DownloadStatus::Cancelled
+            ),
             DownloadStatus::Completed | DownloadStatus::Failed | DownloadStatus::Cancelled => {
                 // Terminal states can transition to Idle or Analyzing on restart
                 matches!(

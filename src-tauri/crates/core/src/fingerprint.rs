@@ -14,7 +14,10 @@ impl FingerprintEngine {
         file_hash: Option<String>,
     ) -> MediaFingerprint {
         let source_fp = SourceFingerprint {
-            extractor: metadata.extractor.clone().unwrap_or_else(|| "generic".to_string()),
+            extractor: metadata
+                .extractor
+                .clone()
+                .unwrap_or_else(|| "generic".to_string()),
             source_url: metadata.webpage_url.clone(),
             source_id: metadata.id.clone(),
             title: metadata.title.clone(),
@@ -81,7 +84,9 @@ impl FingerprintEngine {
 fn chrono_timestamp() -> String {
     // Standard RFC3339 timestamp format without external chrono dependency
     use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{}.{:03}Z", dur.as_secs(), dur.subsec_millis())
 }
 
@@ -136,6 +141,7 @@ mod tests {
         };
 
         let inspection = MediaInspection {
+            verification_level: crate::types::VerificationLevel::Verified,
             container_format: "mp4".to_string(),
             video_codec: Some("h264".to_string()),
             video_profile: Some("High".to_string()),
@@ -156,6 +162,7 @@ mod tests {
             is_lossy_transcode_warning: false,
             stream_count: Some(2),
             chapters_count: Some(0),
+            subtitle_stream_count: 0,
         };
 
         let fp = FingerprintEngine::generate(&meta, Some(&inspection), None);
