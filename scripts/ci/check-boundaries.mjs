@@ -136,10 +136,10 @@ assert.ok(directives.get('connect-src')?.includes(`http://localhost:${vite.serve
   'CSP must allow the configured local development server');
 assert.deepEqual(directives.get('connect-src'), ["'self'", 'ipc:', `http://localhost:${vite.server.port}`],
   'CSP must limit frontend connections to the app, Tauri IPC, and local development server');
-assert.ok(!directives.get('style-src')?.some((value) => value.includes('fonts.googleapis.com')),
-  'CSP must not permit remote Google Fonts stylesheets');
-assert.ok(!directives.get('font-src')?.some((value) => value.includes('fonts.gstatic.com')),
-  'CSP must not permit remote Google Fonts');
+assert.deepEqual(directives.get('style-src'), ["'self'", "'unsafe-inline'"],
+  'CSP styles must remain limited to the application origin and inline styles');
+assert.deepEqual(directives.get('font-src'), ["'self'", 'data:'],
+  'CSP fonts must remain limited to the application origin and embedded data');
 
 const capabilitiesRoot = join(repositoryRoot, 'src-tauri/capabilities');
 const capabilities = (await readdir(capabilitiesRoot)).filter((name) => name.endsWith('.json'));
