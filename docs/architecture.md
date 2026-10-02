@@ -1,8 +1,8 @@
-# Application Architecture — opendownloader
+# Application Architecture — openDownloader
 
 ## 1. System Overview
 
-opendownloader is built with a dual-runtime desktop architecture combining **Tauri 2 (Rust core)** and a **Vite + React 18 frontend** with typed Inter-Process Communication (IPC).
+openDownloader is built with a dual-runtime desktop architecture combining **Tauri 2 (Rust core)** and a **Vite + React 18 frontend** with typed Inter-Process Communication (IPC).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

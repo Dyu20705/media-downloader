@@ -188,7 +188,7 @@ jobs:
           mkdir package-root
           dpkg-deb --extract "$package" package-root
           test -x package-root/usr/bin/opendownloader
-          test -f "package-root/usr/share/applications/opendownloader.desktop"
+          test -f "package-root/usr/share/applications/openDownloader.desktop"
       - name: Launch packaged application under a virtual display
         run: |
           set +e

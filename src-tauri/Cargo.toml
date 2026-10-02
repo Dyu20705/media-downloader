@@ -1,8 +1,8 @@
 [package]
 name = "opendownloader"
 version = "1.0.0"
-description = "opendownloader Desktop App"
-authors = ["opendownloader Team"]
+description = "openDownloader desktop application"
+authors = ["openDownloader Team"]
 edition = "2021"
 
 [lib]
@@ -35,4 +35,3 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
-

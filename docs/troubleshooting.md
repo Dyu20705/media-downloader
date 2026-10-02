@@ -1,4 +1,4 @@
-# Troubleshooting & Reliability Guide — opendownloader
+# Troubleshooting & Reliability Guide — openDownloader
 
 ## 1. Common Diagnostics & Solutions
 

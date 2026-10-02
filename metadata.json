@@ -1,5 +1,5 @@
 {
-  "name": "opendownloader",
+  "name": "openDownloader",
   "description": "Desktop application for inspecting media URLs and managing downloads with yt-dlp, FFmpeg, and MediaInfo.",
   "requestFramePermissions": [],
   "majorCapabilities": [

@@ -2,11 +2,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APPIMAGE_SRC="$SCRIPT_DIR/src-tauri/target/release/bundle/appimage/opendownloader_1.0.0_amd64.AppImage"
+APPIMAGE_SRC="$SCRIPT_DIR/src-tauri/target/release/bundle/appimage/openDownloader_1.0.0_amd64.AppImage"
 ICON_SRC="$SCRIPT_DIR/src-tauri/icons/128x128@2x.png"
 
 echo "=========================================================="
-echo " Cài đặt opendownloader vào Menu Ứng dụng Ubuntu "
+echo " Cài đặt openDownloader vào Menu Ứng dụng Ubuntu "
 echo "=========================================================="
 
 if [ ! -f "$APPIMAGE_SRC" ]; then
@@ -36,7 +36,7 @@ DESKTOP_FILE="$DESKTOP_DIR/opendownloader.desktop"
 
 cat <<EOF > "$DESKTOP_FILE"
 [Desktop Entry]
-Name=opendownloader
+Name=openDownloader
 GenericName=Download Manager
 Comment=Tải video và âm thanh 4K/HDR từ TikTok, YouTube và SoundCloud
 Exec="$APPIMAGE_SRC" --appimage-extract-and-run %U
@@ -66,7 +66,7 @@ fi
 echo "=========================================================="
 echo "✓ THÀNH CÔNG! Ứng dụng đã xuất hiện trong Menu Ubuntu."
 echo "Bạn có thể:"
-echo "1. Nhấn phím Super (phím Windows), gõ 'opendownloader' và click vào icon để mở app."
+echo "1. Nhấn phím Super (phím Windows), gõ 'openDownloader' và click vào icon để mở app."
 echo "2. Hoặc click đúp vào icon trên màn hình Desktop."
 echo "3. Hoàn toàn không cần mở terminal!"
 echo "=========================================================="

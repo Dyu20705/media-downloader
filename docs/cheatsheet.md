@@ -1,4 +1,4 @@
-# opendownloader — User Cheatsheet & Guide
+# openDownloader — User Cheatsheet & Guide
 
 This cheatsheet provides a clear, technical reference for acquisition operations, output profiles, quality options, tool management, advanced configuration, and troubleshooting.
 
@@ -36,7 +36,7 @@ Clip and Chapter perform fast time-range cuts; boundaries can align to nearby ke
 
 ## 3. Tool Management & Supply Chain
 
-opendownloader manages required external helper tools in an isolated, application-local directory without modifying global Windows `PATH` or registry keys:
+openDownloader manages required external helper tools in an isolated, application-local directory without modifying global Windows `PATH` or registry keys:
 
 - **yt-dlp (`v2026.08.19`)**: Media stream extraction engine.
 - **FFmpeg & FFprobe (`v9.0.2`)**: Audio/video muxing, stream merging, post-processing, and format conversion.

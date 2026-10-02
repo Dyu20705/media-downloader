@@ -1,8 +1,8 @@
-# Security Architecture & Hardening — opendownloader
+# Security Architecture & Hardening — openDownloader
 
 ## 1. Threat Model & Security Principles
 
-opendownloader adheres to a strict principle of least privilege, defense-in-depth, and zero-trust input handling.
+openDownloader adheres to a strict principle of least privilege, defense-in-depth, and zero-trust input handling.
 
 ---
 

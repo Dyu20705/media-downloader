@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "opendownloader",
+  "productName": "openDownloader",
   "version": "1.0.0",
   "identifier": "io.github.dyu20705.opendownloader",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "opendownloader",
+        "title": "openDownloader",
         "width": 980,
         "height": 840,
         "minWidth": 640,
@@ -36,10 +36,10 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright \u00a9 2026 opendownloader Authors",
+    "copyright": "Copyright \u00a9 2026 openDownloader Authors",
     "category": "Utility",
-    "shortDescription": "opendownloader desktop application for high-quality audio and video extraction.",
-    "longDescription": "A desktop application for inspecting media URLs and managing downloads with yt-dlp, FFmpeg, and MediaInfo.",
+    "shortDescription": "openDownloader desktop application for high-quality audio and video extraction.",
+    "longDescription": "openDownloader inspects media URLs and manages downloads with yt-dlp, FFmpeg, and MediaInfo.",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

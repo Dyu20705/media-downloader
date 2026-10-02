@@ -1,12 +1,12 @@
 #!/bin/bash
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APPIMAGE="$DIR/src-tauri/target/release/bundle/appimage/opendownloader_1.0.0_amd64.AppImage"
+APPIMAGE="$DIR/src-tauri/target/release/bundle/appimage/openDownloader_1.0.0_amd64.AppImage"
 BINARY="$DIR/src-tauri/target/release/opendownloader"
 
 chmod +x "$APPIMAGE" 2>/dev/null
 chmod +x "$BINARY" 2>/dev/null
 
-echo "=== Đang khởi chạy opendownloader ==="
+echo "=== Đang khởi chạy openDownloader ==="
 
 # 1. Nếu có biến môi trường DISPLAY hoặc WAYLAND_DISPLAY
 if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then

@@ -1,8 +1,8 @@
-# opendownloader
+# openDownloader
 
-opendownloader is a desktop application for inspecting a media URL, reviewing an acquisition plan, and downloading a single video, audio track, clip/chapter, thumbnail, or one subtitle language per job. It uses Tauri, Rust, React, and separately managed media tools.
+openDownloader is a desktop application for inspecting a media URL, reviewing an acquisition plan, and downloading a single video, audio track, clip/chapter, thumbnail, or one subtitle language per job. It uses Tauri, Rust, React, and separately managed media tools.
 
-Repository: [github.com/Dyu20705/opendownloader](https://github.com/Dyu20705/opendownloader)
+Repository: [github.com/Dyu20705/openDownloader](https://github.com/Dyu20705/openDownloader)
 
 ## Support and limitations
 
