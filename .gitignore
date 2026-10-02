@@ -37,8 +37,8 @@ temp_downloads/
 # Bundles and release packages
 *.AppImage
 *.zip
-One-Click-Media-Downloader-Linux/
-One-Click-Media-Downloader-Linux.zip
+opendownloader-linux/
+opendownloader-linux.zip
 release/
 
 # Temporary files & logs

@@ -1,6 +1,6 @@
 # Universal Media Resolver Architecture
 
-The **Universal Media Resolver** transforms One-Click Media Downloader from a site-specific tool into an adaptive, universal media intake engine. The user simply provides any URL, and the resolver analyzes, classifies, and selects the most efficient processing pipeline automatically without requiring deep format knowledge.
+The **Universal Media Resolver** transforms opendownloader from a site-specific tool into an adaptive, universal media intake engine. The user simply provides any URL, and the resolver analyzes, classifies, and selects the most efficient processing pipeline automatically without requiring deep format knowledge.
 
 ---
 

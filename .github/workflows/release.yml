@@ -142,7 +142,7 @@ jobs:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
           if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:WINDOWS_CERTIFICATE_THUMBPRINT) { throw 'Windows production signing secrets are required.' }
-          $pfx = Join-Path $env:RUNNER_TEMP 'openDownloader-signing.pfx'
+          $pfx = Join-Path $env:RUNNER_TEMP 'opendownloader-signing.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
           Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
@@ -162,8 +162,8 @@ jobs:
           set -eu
           test -n "$APPLE_CERTIFICATE" && test -n "$APPLE_CERTIFICATE_PASSWORD" && test -n "$APPLE_SIGNING_IDENTITY"
           test -n "$APPLE_API_ISSUER" && test -n "$APPLE_API_KEY" && test -n "$APPLE_API_KEY_CONTENT" && test -n "$APPLE_TEAM_ID"
-          keychain="$RUNNER_TEMP/openDownloader-signing.keychain-db"
-          certificate="$RUNNER_TEMP/openDownloader-signing.p12"
+          keychain="$RUNNER_TEMP/opendownloader-signing.keychain-db"
+          certificate="$RUNNER_TEMP/opendownloader-signing.p12"
           api_key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
           keychain_password=$(openssl rand -hex 24)
           printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
@@ -286,4 +286,4 @@ jobs:
       - name: Publish stable release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/platforms/* release-assets/final/* --verify-tag --title "openDownloader $GITHUB_REF_NAME" --notes-file release-notes.md
+        run: gh release create "$GITHUB_REF_NAME" release-assets/platforms/* release-assets/final/* --verify-tag --title "opendownloader $GITHUB_REF_NAME" --notes-file release-notes.md

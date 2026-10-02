@@ -187,12 +187,12 @@ jobs:
           dpkg-deb --info "$package"
           mkdir package-root
           dpkg-deb --extract "$package" package-root
-          test -x package-root/usr/bin/one-click-media-downloader
-          test -f "package-root/usr/share/applications/One-Click Media Downloader.desktop"
+          test -x package-root/usr/bin/opendownloader
+          test -f "package-root/usr/share/applications/opendownloader.desktop"
       - name: Launch packaged application under a virtual display
         run: |
           set +e
-          xvfb-run -a timeout 15s package-root/usr/bin/one-click-media-downloader
+          xvfb-run -a timeout 15s package-root/usr/bin/opendownloader
           status=$?
           set -e
           test "$status" -eq 124

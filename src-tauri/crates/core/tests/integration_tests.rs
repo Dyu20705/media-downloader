@@ -1,11 +1,11 @@
-use ocmd_core::analyzer::parse_ytdlp_json;
-use ocmd_core::diagnostics::DiagnosticsBuffer;
-use ocmd_core::path_validator::{sanitize_file_name, validate_and_ensure_directory};
-use ocmd_core::state_machine::DownloadStateMachine;
-use ocmd_core::tools::ToolResolver;
-use ocmd_core::types::{DownloadStatus, MediaKind};
-use ocmd_core::url_validator::validate_media_url;
-use ocmd_core::{
+use opendownloader_core::analyzer::parse_ytdlp_json;
+use opendownloader_core::diagnostics::DiagnosticsBuffer;
+use opendownloader_core::path_validator::{sanitize_file_name, validate_and_ensure_directory};
+use opendownloader_core::state_machine::DownloadStateMachine;
+use opendownloader_core::tools::ToolResolver;
+use opendownloader_core::types::{DownloadStatus, MediaKind};
+use opendownloader_core::url_validator::validate_media_url;
+use opendownloader_core::{
     execution::{compile_acquisition_args, ExecutionContext},
     media_graph::MediaGraph,
     planner::AcquisitionPlanner,
@@ -46,7 +46,7 @@ fn test_path_validation_and_sanitization() {
 
 #[test]
 fn test_acquisition_compilation() {
-    use ocmd_core::types::*;
+    use opendownloader_core::types::*;
     let metadata = parse_ytdlp_json(r#"{"id":"test","title":"Test","formats":[{"format_id":"v","ext":"mp4","width":1280,"height":720,"vcodec":"h264","acodec":"aac"}]}"#, "https://example.com/video").unwrap();
     let graph = MediaGraph::build_source_graph(&metadata, MediaSourceType::YtDlpExtractor);
     let request = AcquisitionRequest {

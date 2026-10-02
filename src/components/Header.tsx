@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
             <Download className="w-4 h-4" aria-hidden="true" />
           </div>
           <span className="font-semibold text-sm sm:text-base text-zinc-100 tracking-tight">
-            Media Downloader
+            opendownloader
           </span>
         </div>
 

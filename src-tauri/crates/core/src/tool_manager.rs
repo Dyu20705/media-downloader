@@ -233,13 +233,13 @@ impl ToolManager {
     }
 
     /// Compute default application-local directory without touching Windows PATH or System directories:
-    /// `%LOCALAPPDATA%\OneClickMediaDownloader\tools\` on Windows
-    /// `~/.local/share/one-click-media-downloader/tools/` on Linux/macOS
+    /// `%LOCALAPPDATA%\opendownloader\tools\` on Windows
+    /// `~/.local/share/opendownloader/tools/` on Linux/macOS
     pub fn resolve_default_tools_directory() -> PathBuf {
         if let Some(local_app_data) = dirs::data_local_dir() {
-            local_app_data.join("OneClickMediaDownloader").join("tools")
+            local_app_data.join("opendownloader").join("tools")
         } else if let Some(home) = dirs::home_dir() {
-            home.join(".one-click-media-downloader").join("tools")
+            home.join(".opendownloader").join("tools")
         } else {
             PathBuf::from("tools")
         }
@@ -499,7 +499,12 @@ impl ToolManager {
         if let Ok(path_var) = std::env::var("PATH") {
             let split_char = if cfg!(windows) { ';' } else { ':' };
             for dir in path_var.split(split_char) {
-                if dir.is_empty() || (!self.development_search && !Path::new(dir).is_absolute()) {
+                #[cfg(debug_assertions)]
+                let reject_relative_path =
+                    !self.development_search && !Path::new(dir).is_absolute();
+                #[cfg(not(debug_assertions))]
+                let reject_relative_path = !Path::new(dir).is_absolute();
+                if dir.is_empty() || reject_relative_path {
                     continue;
                 }
                 let dir_path = Path::new(dir);
@@ -902,7 +907,7 @@ impl ToolManager {
         // Perform download
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
-            .user_agent("OneClickMediaDownloader/1.0")
+            .user_agent("opendownloader/1.0")
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?;

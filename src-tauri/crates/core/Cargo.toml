@@ -1,11 +1,11 @@
 [package]
-name = "ocmd-core"
+name = "opendownloader-core"
 version = "1.0.0"
-description = "Core domain logic and process execution engine for One-Click Media Downloader"
+description = "Core domain logic and process execution engine for opendownloader"
 edition = "2021"
 
 [lib]
-name = "ocmd_core"
+name = "opendownloader_core"
 path = "src/lib.rs"
 
 [dependencies]

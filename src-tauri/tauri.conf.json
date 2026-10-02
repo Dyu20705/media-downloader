@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "One-Click Media Downloader",
+  "productName": "opendownloader",
   "version": "1.0.0",
-  "identifier": "com.oneclick.media.downloader",
+  "identifier": "io.github.dyu20705.opendownloader",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "One-Click Media Downloader",
+        "title": "opendownloader",
         "width": 980,
         "height": 840,
         "minWidth": 640,
@@ -36,10 +36,10 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright \u00a9 2026 One-Click Media Downloader Authors",
+    "copyright": "Copyright \u00a9 2026 opendownloader Authors",
     "category": "Utility",
-    "shortDescription": "One-Click Media Downloader desktop application for high-quality audio and video extraction.",
-    "longDescription": "A robust, offline-capable desktop media downloader powered by yt-dlp, FFmpeg, and MediaInfo, providing clean presets and deep technical inspection.",
+    "shortDescription": "opendownloader desktop application for high-quality audio and video extraction.",
+    "longDescription": "A desktop application for inspecting media URLs and managing downloads with yt-dlp, FFmpeg, and MediaInfo.",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

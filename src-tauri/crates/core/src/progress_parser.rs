@@ -3,7 +3,7 @@ use regex::Regex;
 use std::sync::OnceLock;
 
 static DOWNLOAD_REGEX: OnceLock<Regex> = OnceLock::new();
-pub const FINAL_PATH_PREFIX: &str = "__OCMD_FINAL_PATH__";
+pub const FINAL_PATH_PREFIX: &str = "__OPENDOWNLOADER_FINAL_PATH__";
 
 fn get_download_regex() -> &'static Regex {
     DOWNLOAD_REGEX.get_or_init(|| {
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_parse_machine_readable_final_path() {
-        let line = "__OCMD_FINAL_PATH__/tmp/final video.webm";
+        let line = "__OPENDOWNLOADER_FINAL_PATH__/tmp/final video.webm";
         assert!(matches!(
             parse_progress_line(line),
             ParsedLineEvent::Destination(path) if path == "/tmp/final video.webm"

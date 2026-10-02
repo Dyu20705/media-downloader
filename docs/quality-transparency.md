@@ -1,7 +1,7 @@
 # Quality Transparency & Download Plan Design
 
 Status: **Slice 2 complete — canonical plan, pre-download presentation, verified actual output, and diff implemented**
-Owner: media-downloader
+Owner: opendownloader
 Target branch: `feat/canonical-acquisition-plan`
 
 ## 1. Problem

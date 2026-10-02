@@ -1,4 +1,4 @@
-use ocmd_core::{
+use opendownloader_core::{
     analyzer::parse_ytdlp_json,
     execution::{compile_acquisition_args, ExecutionContext},
     media_graph::MediaGraph,
@@ -111,7 +111,7 @@ async fn explicit_transforms_produce_planned_codecs_with_real_ffmpeg() {
             "{}",
             String::from_utf8_lossy(&transformed.stderr)
         );
-        let actual = ocmd_core::media_verifier::verify_and_inspect_media(
+        let actual = opendownloader_core::media_verifier::verify_and_inspect_media(
             &output,
             Some(std::path::Path::new("ffprobe")),
             true,
@@ -121,24 +121,25 @@ async fn explicit_transforms_produce_planned_codecs_with_real_ffmpeg() {
         assert_eq!(actual.video_codec.as_deref(), Some("h264"));
         assert_eq!(actual.audio_codec.as_deref(), Some("aac"));
         assert_eq!((actual.width, actual.height), (Some(32), Some(32)));
-        let conformance = ocmd_core::plan_verifier::verify_against_plan(&plan, &actual);
+        let conformance = opendownloader_core::plan_verifier::verify_against_plan(&plan, &actual);
         assert!(conformance.conforms, "{:?}", conformance.mismatches);
         let mut wrong = actual.clone();
         wrong.audio_codec = Some("opus".into());
         wrong.width = Some(1280);
         wrong.duration_seconds = Some(60.0);
-        let mismatch = ocmd_core::plan_verifier::verify_against_plan(&plan, &wrong);
+        let mismatch = opendownloader_core::plan_verifier::verify_against_plan(&plan, &wrong);
         assert!(!mismatch.conforms);
         assert!(mismatch.mismatches.iter().any(|m| m.field == "Audio codec"));
         assert!(mismatch.mismatches.iter().any(|m| m.field == "Width"));
         assert!(mismatch.mismatches.iter().any(|m| m.field == "Duration"));
         let mut missing = actual.clone();
         missing.audio_codec = None;
-        assert!(!ocmd_core::plan_verifier::verify_against_plan(&plan, &missing).conforms);
+        assert!(!opendownloader_core::plan_verifier::verify_against_plan(&plan, &missing).conforms);
         let mut subtitle_plan = plan.clone();
         subtitle_plan.post_process.subtitle_mode = SubtitleMode::Embed;
         subtitle_plan.selected_streams.subtitle_languages = vec!["en".into()];
-        let verification = ocmd_core::plan_verifier::verify_against_plan(&subtitle_plan, &actual);
+        let verification =
+            opendownloader_core::plan_verifier::verify_against_plan(&subtitle_plan, &actual);
         assert!(verification
             .mismatches
             .iter()
@@ -200,7 +201,7 @@ async fn explicit_transforms_produce_planned_codecs_with_real_ffmpeg() {
         .finalize
         .unwrap();
         run(transform.arguments(&decorated, &decorated_output));
-        let with_embeds = ocmd_core::media_verifier::verify_and_inspect_media(
+        let with_embeds = opendownloader_core::media_verifier::verify_and_inspect_media(
             &decorated_output,
             Some(std::path::Path::new("ffprobe")),
             true,
@@ -209,7 +210,8 @@ async fn explicit_transforms_produce_planned_codecs_with_real_ffmpeg() {
         .unwrap();
         assert_eq!(with_embeds.subtitle_stream_count, 1);
         assert!(
-            ocmd_core::plan_verifier::verify_against_plan(&subtitle_plan, &with_embeds).conforms
+            opendownloader_core::plan_verifier::verify_against_plan(&subtitle_plan, &with_embeds)
+                .conforms
         );
         let probe = std::process::Command::new("ffprobe")
             .args(["-v", "error", "-show_streams", "-of", "json"])

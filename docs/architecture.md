@@ -1,8 +1,8 @@
-# Application Architecture — One-Click Media Downloader
+# Application Architecture — opendownloader
 
 ## 1. System Overview
 
-One-Click Media Downloader is built with a dual-runtime desktop architecture combining **Tauri 2 (Rust core)** and a **Vite + React 18 frontend** with typed Inter-Process Communication (IPC).
+opendownloader is built with a dual-runtime desktop architecture combining **Tauri 2 (Rust core)** and a **Vite + React 18 frontend** with typed Inter-Process Communication (IPC).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

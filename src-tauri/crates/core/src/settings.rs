@@ -21,7 +21,7 @@ impl SettingsManager {
     pub fn new() -> Self {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("one-click-media-downloader");
+            .join("opendownloader");
 
         let file_path = config_dir.join("settings.json");
         let initial_settings = Self::load_from_disk(&file_path);

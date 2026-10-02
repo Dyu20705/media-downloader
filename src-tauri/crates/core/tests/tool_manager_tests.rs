@@ -2,10 +2,10 @@ use std::fs;
 use std::sync::Arc;
 use tempfile::tempdir;
 
-use ocmd_core::diagnostics::DiagnosticsBuffer;
-use ocmd_core::tool_manager::{get_pinned_tool_spec, ToolManager, PINNED_TOOLS};
+use opendownloader_core::diagnostics::DiagnosticsBuffer;
+use opendownloader_core::tool_manager::{get_pinned_tool_spec, ToolManager, PINNED_TOOLS};
 #[cfg(unix)]
-use ocmd_core::types::{AppSettings, ToolStatus};
+use opendownloader_core::types::{AppSettings, ToolStatus};
 
 #[test]
 fn test_pinned_versions_catalog() {
@@ -37,7 +37,7 @@ fn test_checksum_verification_valid_and_tampered() {
     let file_path = dir.path().join("test_binary.bin");
 
     // Write deterministic content
-    let content = b"one-click-media-downloader-safe-executable-test";
+    let content = b"opendownloader-safe-executable-test";
     fs::write(&file_path, content).unwrap();
 
     let computed_hash = ToolManager::compute_sha256(&file_path).unwrap();

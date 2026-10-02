@@ -1,4 +1,4 @@
-use ocmd_core::{
+use opendownloader_core::{
     analyzer::parse_ytdlp_json,
     execution::{compile_acquisition_args, ExecutionContext},
     media_graph::MediaGraph,
@@ -221,7 +221,7 @@ fn ordinary_video_subtitle_settings_resolve_into_concrete_plan_tracks() {
 fn subtitle_preference_exclusions_and_auto_track_policy_are_resolved_before_compile() {
     let graph = with_subtitles();
     let resolve = |pattern, auto| {
-        ocmd_core::subtitle_selection::resolve_subtitle_preference(
+        opendownloader_core::subtitle_selection::resolve_subtitle_preference(
             pattern,
             &graph.subtitle_streams,
             auto,
@@ -431,11 +431,11 @@ async fn srt_only_source_is_converted_to_the_promised_vtt_artifact_offline() {
         "{}",
         String::from_utf8_lossy(&result.stdout)
     );
-    let actual = ocmd_core::media_verifier::verify_subtitle(&artifact)
+    let actual = opendownloader_core::media_verifier::verify_subtitle(&artifact)
         .await
         .unwrap();
     assert_eq!(actual.container_format, "vtt");
-    assert!(ocmd_core::plan_verifier::verify_against_plan(&plan, &actual).conforms);
+    assert!(opendownloader_core::plan_verifier::verify_against_plan(&plan, &actual).conforms);
     assert!(std::fs::read_to_string(artifact)
         .unwrap()
         .contains("Regression caption"));

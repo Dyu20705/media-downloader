@@ -1,6 +1,6 @@
 {
-  "name": "One-Click Media Downloader",
-  "description": "Ultra-fast orchestration layer for yt-dlp, FFmpeg, and MediaInfo with one-click presets, technical diagnostics, and media inspection.",
+  "name": "opendownloader",
+  "description": "Desktop application for inspecting media URLs and managing downloads with yt-dlp, FFmpeg, and MediaInfo.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

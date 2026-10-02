@@ -1,4 +1,4 @@
-# Troubleshooting & Reliability Guide — One-Click Media Downloader
+# Troubleshooting & Reliability Guide — opendownloader
 
 ## 1. Common Diagnostics & Solutions
 
@@ -8,7 +8,7 @@
 | :--- | :--- | :--- |
 | **"Tool missing or damaged"** | Executable missing or checksum validation failed. | Click **Engine Tools** in header → Click **Install / Repair**. |
 | **"Checksum mismatch"** | Incomplete download or tampered binary. | Click **Repair Tool** in the Tools dialog to re-download from official source. |
-| **"Permission denied running executable"** | Antivirus blocked binary execution in AppData. | Add exclusion for `%LOCALAPPDATA%\OneClickMediaDownloader\tools\`. |
+| **"Permission denied running executable"** | Antivirus blocked binary execution in AppData. | Add exclusion for `%LOCALAPPDATA%\opendownloader\tools\`. |
 
 ### 1.2 Download Failures
 

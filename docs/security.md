@@ -1,8 +1,8 @@
-# Security Architecture & Hardening — One-Click Media Downloader
+# Security Architecture & Hardening — opendownloader
 
 ## 1. Threat Model & Security Principles
 
-One-Click Media Downloader adheres to a strict principle of least privilege, defense-in-depth, and zero-trust input handling.
+opendownloader adheres to a strict principle of least privilege, defense-in-depth, and zero-trust input handling.
 
 ---
 

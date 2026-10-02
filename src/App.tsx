@@ -313,7 +313,7 @@ export const App: React.FC = () => {
 
       {/* 3. Footer Bar */}
       <footer className="py-4 border-t border-zinc-900 text-center text-xs text-zinc-600 flex items-center justify-between px-6">
-        <span>One-Click Media Downloader</span>
+        <span>opendownloader</span>
         <span>Engine: yt-dlp + FFmpeg + MediaInfo</span>
       </footer>
 

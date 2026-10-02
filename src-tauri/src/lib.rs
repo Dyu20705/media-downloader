@@ -1,5 +1,5 @@
 pub mod commands;
-pub use ocmd_core as core;
+pub use opendownloader_core as core;
 
 use commands::AppState;
 use core::diagnostics::DiagnosticsBuffer;
@@ -54,7 +54,7 @@ pub fn run() {
     let settings = Arc::new(SettingsManager::new());
     let database_path = dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("openDownloader")
+        .join("opendownloader")
         .join("downloads.sqlite3");
     let job_store = initialize_job_store(&database_path, &diagnostics);
     let mut download_manager =

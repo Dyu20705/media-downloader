@@ -259,7 +259,7 @@ export const MediaEngineSetupCard: React.FC<MediaEngineSetupCardProps> = ({
 
           <div className="p-3 rounded-xl bg-zinc-950/30 border border-zinc-800/60 text-zinc-500 text-[11px] leading-relaxed">
             <span className="font-medium text-zinc-400">Resolution Security: </span>
-            Tools are stored safely in an application-local location (<code className="text-zinc-400">%LOCALAPPDATA%\OneClickMediaDownloader\tools\</code>). System PATH and Windows registry are never modified. Incomplete temporary files never become active.
+            Tools are stored safely in an application-local location (<code className="text-zinc-400">%LOCALAPPDATA%\opendownloader\tools\</code>). System PATH and Windows registry are never modified. Incomplete temporary files never become active.
           </div>
         </div>
       )}
