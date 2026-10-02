@@ -65,7 +65,7 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg --no-progress --yes
       - name: Install Python for offline tool fixtures
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: 3.12.10
       - name: Install pinned yt-dlp fixture tool
@@ -208,7 +208,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: 3.12.10
       - name: Install pinned workflow security linter
