@@ -28,8 +28,18 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin main
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF_NAME" != main ]; then echo 'Verification builds must be dispatched from main.' >&2; exit 1; fi
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$GITHUB_REF_NAME" != main ]; then
+              echo 'Verification builds must be dispatched from main.' >&2
+              exit 1
+            fi
+            if [ "$GITHUB_SHA" != "$(git rev-parse origin/main)" ]; then
+              echo 'Verification SHA is no longer the current main HEAD; dispatch again from main.' >&2
+              exit 1
+            fi
+          else
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          fi
           python3 - <<'PY'
           import json, os, re, tomllib
           from pathlib import Path
@@ -42,9 +52,57 @@ jobs:
           if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ['GITHUB_REF_NAME'] != f'v{package_version}': raise SystemExit('Release tag must exactly match the package SemVer.')
           if f'## {package_version}' not in Path('CHANGELOG.md').read_text(): raise SystemExit('Current version is missing from CHANGELOG.md')
           PY
+  credential-preflight:
+    name: Credential preflight (${{ matrix.kind }})
+    needs: validate
+    environment: production-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: windows
+            os: windows-2025
+          - kind: macos
+            os: macos-15-intel
+          - kind: gpg
+            os: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate Windows signing certificate and SDK
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: ./scripts/release/import-windows-signing.ps1
+      - name: Validate Apple certificate and notarization credentials
+        if: matrix.kind == 'macos'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: bash scripts/release/prepare-apple-signing.sh
+      - name: Validate release GPG signing key
+        if: matrix.kind == 'gpg'
+        shell: bash
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: bash scripts/release/prepare-gpg-signing.sh
+
   quality:
     name: Release quality and security gates (${{ github.sha }})
-    needs: validate
+    needs: [validate, credential-preflight]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -108,7 +166,7 @@ jobs:
       - name: Audit shipped npm dependencies
         run: npm audit --omit=dev --audit-level=high
   package:
-    needs: [validate, quality]
+    needs: [validate, credential-preflight, quality]
     environment: production-release
     permissions:
       contents: read
@@ -145,21 +203,15 @@ jobs:
         with:
           toolchain: 1.96.0
       - run: npm ci --no-audit --fund=false
-      - name: Require and import Windows signing certificate
+      - name: Import and validate Windows signing certificate
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: |
-          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:WINDOWS_CERTIFICATE_THUMBPRINT) { throw 'Windows production signing secrets are required.' }
-          $pfx = Join-Path $env:RUNNER_TEMP 'opendownloader-signing.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          Remove-Item -Force $pfx
-      - name: Require Apple signing and notarization credentials
+        run: ./scripts/release/import-windows-signing.ps1
+      - name: Import and validate Apple signing/notarization credentials
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -169,44 +221,31 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          test -n "$APPLE_CERTIFICATE" && test -n "$APPLE_CERTIFICATE_PASSWORD" && test -n "$APPLE_SIGNING_IDENTITY"
-          test -n "$APPLE_API_ISSUER" && test -n "$APPLE_API_KEY" && test -n "$APPLE_API_KEY_CONTENT" && test -n "$APPLE_TEAM_ID"
-          keychain="$RUNNER_TEMP/opendownloader-signing.keychain-db"
-          certificate="$RUNNER_TEMP/opendownloader-signing.p12"
-          api_key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
-          keychain_password=$(openssl rand -hex 24)
-          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
-          printf '%s' "$APPLE_API_KEY_CONTENT" > "$api_key"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$certificate" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security list-keychains -d user -s "$keychain"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
-          rm -f "$certificate"
-          echo "APPLE_API_KEY_PATH=$api_key" >> "$GITHUB_ENV"
+        run: bash scripts/release/prepare-apple-signing.sh
       - name: Build signed native package
         env:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run tauri -- build --bundles ${{ matrix.bundle }}
-      - name: Verify Windows installer Authenticode signature
+      - name: Verify Windows application and installer Authenticode signatures
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
-          $files = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe')
-          if ($files.Count -ne 1) { throw 'Expected exactly one NSIS setup executable.' }
-          $signature = Get-AuthenticodeSignature -LiteralPath $files[0].FullName
-          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "Installer signature status: $($signature.Status)." }
-          if ($signature.SignerCertificate.Thumbprint -ne ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '')) { throw 'Installer signer thumbprint mismatch.' }
+          $expected = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe')
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS setup executable.' }
+          $application = Get-Item 'src-tauri/target/release/opendownloader.exe' -ErrorAction Stop
+          foreach ($file in @($application, $installers[0])) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "$($file.Name) signature status: $($signature.Status)." }
+            if (-not $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expected) {
+              throw "$($file.Name) signer thumbprint mismatch."
+            }
+          }
       - name: Verify macOS app signature and notarization
         if: runner.os == 'macOS'
         shell: bash
@@ -219,6 +258,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "${apps[0]}"
           spctl --assess --type execute --verbose=4 "${apps[0]}"
           xcrun stapler validate "${apps[0]}"
+          xcrun stapler validate "${dmgs[0]}"
       - name: Select expected package and create uniquely named artifact
         shell: bash
         run: |
@@ -256,19 +296,31 @@ jobs:
         with:
           path: release-assets/platforms
           merge-multiple: true
-      - name: Require and verify signed combined checksum manifest
+      - name: Reconfirm manual verification still targets current main
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)" || {
+            echo 'main moved during release verification; rerun from the new main HEAD.' >&2
+            exit 1
+          }
+      - name: Prepare and validate release GPG signing key
         env:
           RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: bash scripts/release/prepare-gpg-signing.sh
+      - name: Create and verify signed combined checksum manifest
+        env:
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         run: |
           set -euo pipefail
-          test -n "$RELEASE_GPG_PRIVATE_KEY" -a -n "$RELEASE_GPG_PASSPHRASE" || { echo 'Signing verification requires RELEASE_GPG_PRIVATE_KEY and RELEASE_GPG_PASSPHRASE.' >&2; exit 1; }
           test "$(find release-assets/platforms -type f | wc -l)" -eq 3
           mkdir -p release-assets/final
           (cd release-assets/platforms && find . -type f -printf '%P\0' | sort -z | xargs -0 sha256sum) > release-assets/final/SHA256SUMS
-          printf '%s' "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
-          gpg --batch --armor --export > release-assets/final/RELEASE-GPG-PUBLIC-KEY.asc
-          printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --detach-sign --armor release-assets/final/SHA256SUMS
+          gpg --batch --armor --export "$RELEASE_GPG_FINGERPRINT" > release-assets/final/RELEASE-GPG-PUBLIC-KEY.asc
+          test -s release-assets/final/RELEASE-GPG-PUBLIC-KEY.asc
+          printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$RELEASE_GPG_FINGERPRINT" --detach-sign --armor release-assets/final/SHA256SUMS
           gpg --verify release-assets/final/SHA256SUMS.asc release-assets/final/SHA256SUMS
           (cd release-assets/platforms && sha256sum --check ../final/SHA256SUMS)
       - name: Upload signed artifacts for workflow-run smoke testing
