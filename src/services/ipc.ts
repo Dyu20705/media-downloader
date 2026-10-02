@@ -14,32 +14,51 @@ import type {
   ToolStatusInfo,
 } from '../types';
 
+function ensureTauriRuntime(): void {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+    throw new Error(
+      'The desktop app bridge is unavailable. Open openDownloader from the installed desktop app and try again.',
+    );
+  }
+}
+
+function invokeTauri<T>(command: string, args?: object): Promise<T> {
+  try {
+    ensureTauriRuntime();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
+  return invoke<T>(command, args as Record<string, unknown> | undefined);
+}
+
 export const ipc = {
-  analyzeMedia: (url: string) => invoke<MediaMetadata>('analyze_media', { url }),
+  analyzeMedia: (url: string) => invokeTauri<MediaMetadata>('analyze_media', { url }),
   planAcquisition: (metadata: MediaMetadata, acquisition: AcquisitionRequest) =>
-    invoke<AcquisitionPlan>('plan_acquisition', { metadata, acquisition }),
+    invokeTauri<AcquisitionPlan>('plan_acquisition', { metadata, acquisition }),
   buildCommand: (request: BuildCommandRequest) =>
-    invoke<BuildCommandResponse>('build_command', { request }),
+    invokeTauri<BuildCommandResponse>('build_command', { request }),
   startDownload: (request: StartDownloadRequest) =>
-    invoke<DownloadJob>('start_download', { request }),
+    invokeTauri<DownloadJob>('start_download', { request }),
   cancelDownload: (jobId: string) =>
-    invoke<DownloadJob>('cancel_download', { jobId }),
-  getActiveJob: () => invoke<DownloadJob | null>('get_active_job'),
-  getDownloadHistory: () => invoke<DownloadJob[]>('get_download_history'),
-  retryDownload: (jobId: string) => invoke<DownloadJob>('retry_download', { jobId }),
-  getToolStatus: () => invoke<ToolHealth[]>('get_tool_status'),
-  getDetailedToolStatus: () => invoke<ToolStatusInfo[]>('get_detailed_tool_status'),
-  installTool: (name: string) => invoke<ToolStatusInfo>('install_tool', { name }),
-  repairTool: (name: string) => invoke<ToolStatusInfo>('repair_tool', { name }),
-  installAllTools: () => invoke<ToolStatusInfo[]>('install_all_missing_tools'),
-  autoBootstrapTools: () => invoke<ToolStatusInfo[]>('auto_bootstrap_tools'),
-  getSettings: () => invoke<AppSettings>('get_settings'),
-  saveSettings: (settings: AppSettings) => invoke<AppSettings>('save_settings', { settings }),
-  getDiagnostics: () => invoke<DiagnosticLog[]>('get_diagnostics'),
-  clearDiagnostics: () => invoke<void>('clear_diagnostics'),
-  openFolder: (path: string) => invoke<void>('open_folder', { path }),
-  openFile: (path: string) => invoke<void>('open_file', { path }),
+    invokeTauri<DownloadJob>('cancel_download', { jobId }),
+  getActiveJob: () => invokeTauri<DownloadJob | null>('get_active_job'),
+  getDownloadHistory: () => invokeTauri<DownloadJob[]>('get_download_history'),
+  retryDownload: (jobId: string) => invokeTauri<DownloadJob>('retry_download', { jobId }),
+  getToolStatus: () => invokeTauri<ToolHealth[]>('get_tool_status'),
+  getDetailedToolStatus: () => invokeTauri<ToolStatusInfo[]>('get_detailed_tool_status'),
+  installTool: (name: string) => invokeTauri<ToolStatusInfo>('install_tool', { name }),
+  repairTool: (name: string) => invokeTauri<ToolStatusInfo>('repair_tool', { name }),
+  installAllTools: () => invokeTauri<ToolStatusInfo[]>('install_all_missing_tools'),
+  autoBootstrapTools: () => invokeTauri<ToolStatusInfo[]>('auto_bootstrap_tools'),
+  getSettings: () => invokeTauri<AppSettings>('get_settings'),
+  saveSettings: (settings: AppSettings) => invokeTauri<AppSettings>('save_settings', { settings }),
+  getDiagnostics: () => invokeTauri<DiagnosticLog[]>('get_diagnostics'),
+  clearDiagnostics: () => invokeTauri<void>('clear_diagnostics'),
+  openFolder: (path: string) => invokeTauri<void>('open_folder', { path }),
+  openFile: (path: string) => invokeTauri<void>('open_file', { path }),
   selectDirectory: async (): Promise<string | null> => {
+    ensureTauriRuntime();
     const selection = await open({ directory: true, multiple: false });
     return typeof selection === 'string' ? selection : null;
   },

@@ -10,7 +10,13 @@
 | **"Checksum mismatch"** | Incomplete download or tampered binary. | Click **Repair Tool** in the Tools dialog to re-download from official source. |
 | **"Permission denied running executable"** | Antivirus blocked binary execution in AppData. | Add exclusion for `%LOCALAPPDATA%\opendownloader\tools\`. |
 
-### 1.2 Download Failures
+### 1.2 Linux Launch Issues
+
+| Symptom | Probable Cause | Corrective Action |
+| :--- | :--- | :--- |
+| **`symbol lookup error: /snap/core20/.../libpthread.so.0: undefined symbol: __libc_pthread_init, version GLIBC_PRIVATE`** | `LD_LIBRARY_PATH` points to Snap's private glibc libraries, which do not match the host system libraries used by the app. | Start the app with `env -u LD_LIBRARY_PATH npm run tauri dev`, or clear `LD_LIBRARY_PATH` in the terminal before running the app. |
+
+### 1.3 Download Failures
 
 | Symptom | Probable Cause | Corrective Action |
 | :--- | :--- | :--- |
@@ -19,7 +25,7 @@
 | **"Filename too long"** | Media title exceeded Windows 260 char limit. | In **Settings**, ensure **Trim Long Filenames** is enabled (defaults to 180 chars). |
 | **"Post-processing failed (FFmpeg)"** | FFmpeg binary corrupted or disk out of space. | Verify disk space and run **Repair FFmpeg** in Engine Tools. |
 
-### 1.3 Cancellation & Recovery
+### 1.4 Cancellation & Recovery
 - **Cancelled Downloads**: The app immediately issues `taskkill /F /T /PID` on Windows or `SIGKILL` on Unix to kill all child processes. Temporary download files (`.part`, `.ytdl`) remain available for resume or can be cleared.
 - **Interrupted job**: A process restart marks every queued or in-flight job Interrupted. Retry is explicit and creates a new job/output folder; partial files from the old attempt are retained and are not assumed complete.
 
