@@ -36,7 +36,7 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright \u00a9 2026 openDownloader Authors",
+    "copyright": "Copyright © 2026 openDownloader Authors",
     "category": "Utility",
     "shortDescription": "openDownloader desktop application for high-quality audio and video extraction.",
     "longDescription": "openDownloader inspects media URLs and manages downloads with yt-dlp, FFmpeg, and MediaInfo.",
@@ -51,7 +51,9 @@
         ],
         "displayLanguageSelector": false
       },
-      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/sign-windows.ps1 -ArtifactPath \"%1\""
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "tsp": true
     }
   }
 }
