@@ -69,3 +69,7 @@ URL parsing rejects non-HTTP(S) schemes, localhost names, private, loopback, lin
 The preflight check cannot constrain yt-dlp's later independent DNS resolution, redirects, or connections. Therefore private-network protection is not end-to-end for traffic delegated to yt-dlp. A network sandbox or proxy enforcing destination policy for child processes would be needed to provide that guarantee.
 
 Windows release signing uses the protected `WINDOWS_CERTIFICATE` and password to import the certificate, selects it by the configured thumbprint, applies SHA-256 Authenticode signing with the repository's RFC3161 timestamp endpoint, and verifies both SignTool policy and the resulting Authenticode signer identity. No signing material is stored in the repository.
+
+## v1.0.0 upstream advisory exceptions
+
+PR/scheduled and release audits share `scripts/ci/audit-rust.sh`, retaining `--deny warnings` and yanked-package checks. Core has no exceptions. Host accepts exactly RUSTSEC-2024-0370 (unmaintained build-time proc-macro-error) and RUSTSEC-2024-0429 (actual GLib runtime unsoundness on the Linux GTK path) for v1.0.0. See [the security disposition](release-remediation.md) for dependency paths, risk evidence, and re-evaluation requirements. These exceptions do not mean the dependency graph is advisory-free.

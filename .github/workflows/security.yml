@@ -49,7 +49,5 @@ jobs:
           toolchain: 1.96.0
       - name: Install pinned RustSec audit tool
         run: cargo install cargo-audit --locked --version 0.22.2
-      - name: Audit core dependency lockfile
-        run: cargo audit --deny warnings --file src-tauri/crates/core/Cargo.lock
-      - name: Audit Tauri host dependency lockfile
-        run: cargo audit --deny warnings --file src-tauri/Cargo.lock
+      - name: Audit Rust lockfiles with documented v1.0.0 upstream exceptions
+        run: bash scripts/ci/audit-rust.sh

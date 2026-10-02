@@ -4,6 +4,10 @@ openDownloader is a desktop application for inspecting a media URL, reviewing an
 
 Repository: [github.com/Dyu20705/openDownloader](https://github.com/Dyu20705/openDownloader)
 
+## Project status
+
+v1.0.0 is the feature-complete release target. Active feature development is ending after v1.0.0, and the repository may be archived after release verification. No ongoing maintenance or security-response commitment is offered. Users may fork and maintain the project under its MIT License.
+
 ## Support and limitations
 
 The production package workflow targets 64-bit Windows, Linux, and Intel macOS. Managed media-tool availability is narrower than the desktop framework's possible platforms; consult [tool management](docs/tool-management.md) before relying on managed installs. Playlist URLs select one item by default; downloading a whole playlist is not supported. Custom output profiles and metadata-patch requests are unsupported. Media availability and formats depend on the source service and its terms.

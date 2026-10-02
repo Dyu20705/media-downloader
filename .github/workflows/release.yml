@@ -92,8 +92,7 @@ jobs:
       - name: Audit locked Rust dependencies
         run: |
           cargo install cargo-audit --locked --version 0.22.2
-          cargo audit --deny warnings --file src-tauri/crates/core/Cargo.lock
-          cargo audit --deny warnings --file src-tauri/Cargo.lock
+          bash scripts/ci/audit-rust.sh
       - name: Audit shipped npm dependencies
         run: npm audit --omit=dev --audit-level=high
   package:
