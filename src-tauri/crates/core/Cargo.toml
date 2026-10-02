@@ -27,4 +27,4 @@ zip = { version = "2.2", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 tokio = { version = "1.38", features = ["full", "test-util"] }
 tempfile = "3.10"
-ts-rs = { version = "10", features = ["serde-compat"] }
+ts-rs = { version = "12", features = ["serde-compat"] }
