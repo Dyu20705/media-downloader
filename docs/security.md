@@ -68,7 +68,7 @@ URL parsing rejects non-HTTP(S) schemes, localhost names, private, loopback, lin
 
 The preflight check cannot constrain yt-dlp's later independent DNS resolution, redirects, or connections. Therefore private-network protection is not end-to-end for traffic delegated to yt-dlp. A network sandbox or proxy enforcing destination policy for child processes would be needed to provide that guarantee.
 
-Windows release signing uses the protected `WINDOWS_CERTIFICATE` and password to import the certificate, selects it by the configured thumbprint, applies SHA-256 Authenticode signing with the repository's RFC3161 timestamp endpoint, and verifies both SignTool policy and the resulting Authenticode signer identity. No signing material is stored in the repository.
+The current production release target is Linux x86_64. Its Debian artifact is authenticated with a dedicated GPG release key held only in the protected `production-release` environment: the workflow signs the exact `.deb`, signs `SHA256SUMS`, verifies both signatures, re-checks the package hash, and publishes the corresponding public key. GitHub provenance attestation is also produced for the staged package. Windows Authenticode and Apple Developer ID/notarization helpers are retained for future platform enablement but are not invoked by the current production release workflow. No signing material is stored in the repository.
 
 ## v1.0.0 upstream advisory exceptions
 
