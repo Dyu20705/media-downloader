@@ -1,31 +1,52 @@
 # Packaging and release distribution
 
-The release workflow produces a Debian package for Linux x86_64, an NSIS installer for Windows x86_64, and a DMG for Intel macOS. Each production package is built on its native runner. PR CI builds unsigned Windows NSIS and Intel macOS DMG packages with Tauri's `--no-sign` mode so platform bundling failures are discovered before the protected release workflow; Linux CI additionally inspects and launches the Debian package under Xvfb.
+## Current production scope
 
-The stable release path is tag-triggered and must only publish a version whose commit is on `main`. A manual `workflow_dispatch` from `main` is the signed rehearsal: it must target the exact current `main` SHA, validate all production credentials before the expensive quality/package stages, run the full frontend/Rust/security suite, build and verify all three native packages, attest provenance, and produce a GPG-signed combined checksum manifest without publishing a GitHub Release. If `main` moves during that rehearsal, the workflow fails and must be rerun from the new `main` HEAD.
+The current production distribution target is **Linux x86_64 only**, packaged as a Debian `.deb`. Windows x86_64 and Intel macOS remain future production targets.
+
+Pull-request CI deliberately continues to build unsigned Windows NSIS and Intel macOS DMG packages with Tauri's `--no-sign` mode. Those jobs detect portability and bundling regressions without requiring production signing credentials. They are not release artifacts and must not be presented as signed or production-supported downloads.
+
+The Windows and Apple signing helper scripts remain in the repository for future enablement, but the production release workflow does not invoke them and does not require any Windows or Apple secrets.
+
+## Linux release authenticity
+
+Linux release authenticity uses three independent pieces of evidence:
+
+1. the exact `.deb` is inspected and launched under Xvfb before publication;
+2. GitHub build provenance is attested for the staged Debian artifact;
+3. a dedicated release GPG key signs both the Debian artifact and `SHA256SUMS`.
+
+The release also publishes the corresponding public GPG key. A consumer can therefore verify either the package directly or the signed checksum manifest.
 
 ## Required `production-release` environment secrets
 
-Do not commit any signing material. Configure these in GitHub **Settings → Environments → production-release → Environment secrets**:
+Do not commit signing material. Configure only these secrets in GitHub **Settings → Environments → production-release → Environment secrets**:
 
 | Secret | Required format / meaning |
 | --- | --- |
-| `WINDOWS_CERTIFICATE` | Base64 of an exportable PFX/PKCS#12 code-signing certificate **including the private key**. |
-| `WINDOWS_CERTIFICATE_PASSWORD` | Password used when the PFX was exported. |
-| `WINDOWS_CERTIFICATE_THUMBPRINT` | 40-hex SHA-1 thumbprint of that code-signing certificate. |
-| `APPLE_CERTIFICATE` | Single-line base64 of the exported **Developer ID Application** `.p12`, including its private key. |
-| `APPLE_CERTIFICATE_PASSWORD` | Password used when the Apple `.p12` was exported. |
-| `APPLE_SIGNING_IDENTITY` | Exact Developer ID identity, e.g. `Developer ID Application: Name (TEAMID)`, as shown by `security find-identity -v -p codesigning`. |
-| `APPLE_API_ISSUER` | App Store Connect API key issuer UUID. |
-| `APPLE_API_KEY` | App Store Connect API Key ID. |
-| `APPLE_API_KEY_CONTENT` | Raw contents of `AuthKey_<KEY_ID>.p8` including the `BEGIN PRIVATE KEY` / `END PRIVATE KEY` lines; **not base64**. |
-| `RELEASE_GPG_PRIVATE_KEY` | ASCII-armored dedicated release private key; exactly one primary secret key. |
-| `RELEASE_GPG_PASSPHRASE` | Passphrase for the release GPG private key. |
+| `RELEASE_GPG_PRIVATE_KEY` | ASCII-armored dedicated release private key containing exactly one primary secret key. |
+| `RELEASE_GPG_PASSPHRASE` | Passphrase for the dedicated release GPG private key. |
 
-The credential preflight runs all three lanes with `fail-fast: false`: Windows validates the PFX, thumbprint, private key, certificate validity and Windows SDK signing tool; macOS imports the Developer ID certificate into an ephemeral keychain and uses `notarytool history` to authenticate the App Store Connect API key without submitting software; GPG imports the dedicated release key and performs a real sign/verify probe. This is intended to surface all credential problems in one workflow run rather than one at a time.
+A manual `workflow_dispatch` from `main` performs a fast, non-publishing signing preflight. It verifies that the current main SHA is still current, validates version-source consistency, imports the protected GPG key into an ephemeral keyring, and performs a real sign/verify probe. It does **not** rebuild the application.
 
-The Windows release path imports the PFX into the current-user certificate store and then uses Tauri's native Windows signer with a runtime-injected `certificateThumbprint`, SHA-256 digesting, and RFC3161 timestamping. This avoids cwd-sensitive custom signing hooks while still verifying both the built application executable and final NSIS installer with Authenticode and the exact expected thumbprint. The macOS release path lets Tauri sign/notarize the app, then explicitly ensures the distributed DMG itself is notarized and stapled before validating both tickets. The final manifest exports only the configured release GPG key, signs `SHA256SUMS`, verifies that signature, and re-checks all package hashes.
+## Production tag flow
 
-An authorized human must review and accept the exact release candidate before tag creation. After a successful signed rehearsal, owner-controlled Windows/macOS install and startup smoke tests remain required. Only then create `v1.0.0` on the **same verified SHA**; the tag-triggered workflow reruns the same protected gates and publishes the GitHub Release.
+A stable production tag must satisfy all of the following:
 
-No production release has been published by this working branch. Do not treat local bundles or failed/rehearsal artifacts as production releases.
+- the tagged commit is contained in `main`;
+- the tag is exactly `v<version>`;
+- `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/crates/core/Cargo.toml` contain the same SemVer;
+- `CHANGELOG.md` contains exactly the release version section expected by the release-note extractor;
+- the version-scoped RustSec policy is valid for that version.
+
+The tag-triggered workflow then performs the full frontend, Rust, dependency-audit, package, smoke-test, provenance, checksum, and GPG-signing gates against that exact SHA. The Debian artifact is built once in that release run and the same staged bytes are signed, attested, preserved as a workflow artifact, and uploaded to the GitHub Release.
+
+The protected `production-release` environment is the final credential boundary. If environment reviewers are configured, approving the tag-triggered release job is the human publication gate.
+
+## Version and historical releases
+
+Existing public tags/releases must not be deleted or reused to make the new pipeline fit historical state. The repository currently contains historical `v1.0.0` and `v1.0.1` releases while the current development metadata still reports `1.0.0`. Therefore the next production version must be chosen explicitly and synchronized in a dedicated release/version change before creating a new tag.
+
+The security disposition in [release-remediation.md](release-remediation.md) scopes its two RustSec exceptions to `v1.0.0`. A later version must not silently inherit those exceptions; the audit policy intentionally requires re-evaluation.
+
+No Windows or macOS production package is published by the current release workflow.

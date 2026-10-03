@@ -1,5 +1,7 @@
 # v1.0.0 final security disposition
 
+> **Release-scope note (2026-10-03):** this document records the v1.0.0 security disposition and remains historical evidence. The current production packaging scope is Linux x86_64 only; Windows/macOS are unsigned CI portability targets. The two RustSec exceptions below remain scoped to v1.0.0 and must be re-evaluated before any later version. See [packaging.md](packaging.md) for the active release contract.
+
 The final engineering pass starts from `faee83087709800a5f71dbc84a41e4c4f9120edd` on `release/1.0.0-production-hardening`, confirmed against the fetched remote and PR #6. The owner explicitly accepted the two upstream advisory exceptions below for v1.0.0. Engineering validation is separate from final human acceptance, merge, tag creation, and signed release verification.
 
 ## RustSec disposition
@@ -71,4 +73,4 @@ Source and base-to-head history scans and the extracted Debian payload scan are 
 
 Earlier remediation of the development-only helper cfg and Unix test-only constructor is retained. Strict release Clippy and the optimized production-resolution regression pass again. Release quality retains FFmpeg installation so real transformation tests run; FFmpeg, ffprobe, and yt-dlp are also available for local tests.
 
-Release semantics reviewed: version/tag/main-ancestry validation, exact-SHA quality dependencies, all three package targets, protected signing environment, Windows Authenticode/Apple signing and notarization verification, provenance attestation, signed checksum verification, exact release-note extraction, and tag-only publishing remain enabled. Owner-controlled signing and final human approval remain required. The documented v1.0.0 advisory exceptions do not waive any signing, quality, or platform gate.
+Historical v1.0.0 release semantics were reviewed under the earlier three-platform plan. The active release contract has since been narrowed to Linux x86_64 production distribution: exact tag/main/version validation, exact-SHA quality gates, Debian package inspection and launch smoke, provenance attestation, direct GPG package signature, GPG-signed checksum verification, exact release-note extraction, protected signing credentials, and tag-only publication. Windows/macOS production signing is deferred. The documented v1.0.0 advisory exceptions do not automatically apply to any later version.

@@ -53,5 +53,5 @@ jobs:
           toolchain: 1.96.0
       - name: Install pinned RustSec audit tool
         run: cargo install cargo-audit --locked --version 0.22.2
-      - name: Audit Rust lockfiles with documented v1.0.0 upstream exceptions
+      - name: Audit Rust lockfiles with version-scoped exception policy
         run: bash scripts/ci/audit-rust.sh

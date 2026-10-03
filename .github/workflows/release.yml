@@ -1,20 +1,24 @@
-name: Signed desktop release
+name: Signed Linux release
+
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       confirmation:
-        description: 'Type verify to build signed packages from main without publishing a release'
+        description: 'Type verify to validate Linux release signing credentials from the current main HEAD'
         required: true
         type: choice
         options: [verify]
         default: verify
+
 permissions:
   contents: read
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
@@ -30,7 +34,7 @@ jobs:
           git fetch origin main
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             if [ "$GITHUB_REF_NAME" != main ]; then
-              echo 'Verification builds must be dispatched from main.' >&2
+              echo 'Signing verification must be dispatched from main.' >&2
               exit 1
             fi
             if [ "$GITHUB_SHA" != "$(git rev-parse origin/main)" ]; then
@@ -43,364 +47,212 @@ jobs:
           python3 - <<'PY'
           import json, os, re, tomllib
           from pathlib import Path
+
           package_version = json.loads(Path('package.json').read_text())['version']
           tauri_version = json.loads(Path('src-tauri/tauri.conf.json').read_text())['version']
           host = tomllib.loads(Path('src-tauri/Cargo.toml').read_text())['package']['version']
           core = tomllib.loads(Path('src-tauri/crates/core/Cargo.toml').read_text())['package']['version']
           versions = [package_version, tauri_version, host, core]
-          if len(set(versions)) != 1 or not re.fullmatch(r'\d+\.\d+\.\d+', package_version): raise SystemExit(f'Version sources diverge or are not SemVer: {versions}')
-          if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ['GITHUB_REF_NAME'] != f'v{package_version}': raise SystemExit('Release tag must exactly match the package SemVer.')
-          if f'## {package_version}' not in Path('CHANGELOG.md').read_text(): raise SystemExit('Current version is missing from CHANGELOG.md')
+          if len(set(versions)) != 1 or not re.fullmatch(r'\d+\.\d+\.\d+', package_version):
+              raise SystemExit(f'Version sources diverge or are not SemVer: {versions}')
+          if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ['GITHUB_REF_NAME'] != f'v{package_version}':
+              raise SystemExit('Release tag must exactly match the package SemVer.')
+          if f'## {package_version}' not in Path('CHANGELOG.md').read_text():
+              raise SystemExit('Current version is missing from CHANGELOG.md')
           PY
-  credential-preflight:
-    name: Credential preflight (${{ matrix.kind }})
+
+  signing-preflight:
+    name: Linux release signing preflight
+    if: github.event_name == 'workflow_dispatch'
     needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: production-release
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - kind: windows
-            os: windows-2025
-          - kind: macos
-            os: macos-15-intel
-          - kind: gpg
-            os: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Validate Windows signing certificate and SDK
-        if: matrix.kind == 'windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: ./scripts/release/import-windows-signing.ps1
-      - name: Validate Apple certificate and notarization credentials
-        if: matrix.kind == 'macos'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
-        run: bash scripts/release/prepare-apple-signing.sh
-      - name: Validate release GPG signing key
-        if: matrix.kind == 'gpg'
-        shell: bash
+      - name: Validate dedicated release GPG key
         env:
           RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
         run: bash scripts/release/prepare-gpg-signing.sh
 
-  quality:
-    name: Release quality and security gates (${{ github.sha }})
-    needs: [validate, credential-preflight]
+  release-linux:
+    name: Build, verify, sign, and publish Linux x86_64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: validate
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
+    environment: production-release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Validate dedicated release GPG key before expensive work
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: bash scripts/release/prepare-gpg-signing.sh
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.21.0
           package-manager-cache: false
+
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.96.0
           components: rustfmt, clippy
+
       - name: Install pinned Python for media-tool test fixtures
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: 3.12.10
-      - name: Install Tauri Linux build prerequisites
-        run: sudo apt-get update && sudo apt-get install --yes build-essential curl file ffmpeg libayatana-appindicator3-dev libgtk-3-dev libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev pkg-config
+
+      - name: Install Linux build and smoke-test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes             build-essential curl file ffmpeg libayatana-appindicator3-dev libgtk-3-dev             libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev pkg-config xvfb
+
       - name: Install pinned yt-dlp fixture tool
         run: python -m pip install --disable-pip-version-check yt-dlp==2026.8.19
+
       - name: Verify media test tool availability
         run: |
           ffmpeg -version
           ffprobe -version
           yt-dlp --version
+
       - name: Install frontend dependencies
         run: npm ci
+
       - name: Frontend boundary check
         run: npm run check:ci
+
       - name: TypeScript check
         run: npm run typecheck
+
       - name: ESLint
         run: npm run lint
+
       - name: Vitest and release-note tests
         run: npm test
+
       - name: Verify generated IPC bindings
         run: |
           npm run bindings
           git diff --exit-code -- src/generated/ipc.ts
+
       - name: Build frontend production bundle
         run: npm run build
+
       - name: Rust formatting
         run: |
           cargo fmt --manifest-path src-tauri/crates/core/Cargo.toml --check
           cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
       - name: Test Rust core
         run: cargo test --manifest-path src-tauri/crates/core/Cargo.toml --locked
+
       - name: Test Tauri host
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
       - name: Clippy core and host
         run: |
           cargo clippy --manifest-path src-tauri/crates/core/Cargo.toml --locked --all-targets -- -D warnings
           cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+
       - name: Audit locked Rust dependencies
         run: |
           cargo install cargo-audit --locked --version 0.22.2
           bash scripts/ci/audit-rust.sh
+
       - name: Audit shipped npm dependencies
         run: npm audit --omit=dev --audit-level=high
-  package:
-    needs: [validate, credential-preflight, quality]
-    environment: production-release
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            bundle: deb
-            platform: linux-x86_64
-          - os: windows-2025
-            bundle: nsis
-            platform: windows-x86_64
-          - os: macos-15-intel
-            bundle: dmg
-            platform: macos-x86_64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Install Linux prerequisites
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes build-essential curl file libayatana-appindicator3-dev libgtk-3-dev libssl-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev pkg-config
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 24.21.0
-          package-manager-cache: false
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
-        with:
-          toolchain: 1.96.0
-      - run: npm ci --no-audit --fund=false
-      - name: Import and validate Windows signing certificate
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: ./scripts/release/import-windows-signing.ps1
-      - name: Import and validate Apple signing/notarization credentials
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
-        run: bash scripts/release/prepare-apple-signing.sh
-      - name: Build Linux package
-        if: runner.os == 'Linux'
+
+      - name: Build Linux Debian package
         run: npm run tauri -- build --bundles deb
-      - name: Build signed Windows package with Tauri's native signer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: |
-          $thumbprint = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
-          if ($thumbprint -notmatch '^[0-9A-F]{40}$') { throw 'Invalid Windows signing thumbprint.' }
-          $configPath = Join-Path $env:RUNNER_TEMP 'tauri-windows-release.json'
-          @{
-            bundle = @{
-              windows = @{
-                certificateThumbprint = $thumbprint
-              }
-            }
-          } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding utf8
-          npm run tauri -- build --bundles nsis --config $configPath
-      - name: Build signed and notarized macOS package
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-        run: npm run tauri -- build --bundles dmg
-      - name: Ensure the distributed macOS DMG is notarized and stapled
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
-          test "${#dmgs[@]}" -eq 1
-          if xcrun stapler validate "${dmgs[0]}" >/dev/null 2>&1; then
-            echo 'DMG already contains a valid notarization ticket.'
-          else
-            xcrun notarytool submit "${dmgs[0]}" \
-              --key "$APPLE_API_KEY_PATH" \
-              --key-id "$APPLE_API_KEY" \
-              --issuer "$APPLE_API_ISSUER" \
-              --wait
-            xcrun stapler staple "${dmgs[0]}"
-          fi
-      - name: Verify Windows application and installer Authenticode signatures
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: |
-          $expected = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
-          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe')
-          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS setup executable.' }
-          $application = Get-Item 'src-tauri/target/release/opendownloader.exe' -ErrorAction Stop
-          foreach ($file in @($application, $installers[0])) {
-            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
-            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "$($file.Name) signature status: $($signature.Status)." }
-            if (-not $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expected) {
-              throw "$($file.Name) signer thumbprint mismatch."
-            }
-          }
-      - name: Verify macOS DMG, app signature, Gatekeeper, and notarization
-        if: runner.os == 'macOS'
+
+      - name: Inspect and launch the exact Debian release artifact
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
-          test "${#dmgs[@]}" -eq 1
-          hdiutil verify "${dmgs[0]}"
-          xcrun stapler validate "${dmgs[0]}"
-          mount_dir="$RUNNER_TEMP/opendownloader-release-dmg"
-          mkdir -p "$mount_dir"
-          device="$(hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmgs[0]}" | awk 'NR == 1 { print $1 }')"
-          cleanup() {
-            hdiutil detach "$device" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          app="$mount_dir/openDownloader.app"
-          test -d "$app"
-          codesign --verify --deep --strict --verbose=2 "$app"
-          spctl --assess --type execute --verbose=4 "$app"
-          xcrun stapler validate "$app"
-      - name: Select expected package and create uniquely named artifact
+          packages=(src-tauri/target/release/bundle/deb/*.deb)
+          test "${#packages[@]}" -eq 1
+          package="${packages[0]}"
+          dpkg-deb --info "$package"
+          package_root="$RUNNER_TEMP/opendownloader-release-package"
+          rm -rf "$package_root"
+          mkdir -p "$package_root"
+          dpkg-deb --extract "$package" "$package_root"
+          test -x "$package_root/usr/bin/opendownloader"
+          test -f "$package_root/usr/share/applications/openDownloader.desktop"
+          set +e
+          xvfb-run -a timeout 15s "$package_root/usr/bin/opendownloader"
+          status=$?
+          set -e
+          test "$status" -eq 124
+
+      - name: Stage the single Linux production artifact
         shell: bash
         run: |
           set -euo pipefail
-          mkdir release-artifacts
-          case "${{ matrix.bundle }}" in
-            deb) shopt -s nullglob; files=(src-tauri/target/release/bundle/deb/*.deb) ;;
-            nsis) shopt -s nullglob; files=(src-tauri/target/release/bundle/nsis/*-setup.exe) ;;
-            dmg) shopt -s nullglob; files=(src-tauri/target/release/bundle/dmg/*.dmg) ;;
-          esac
-          test "${#files[@]}" -eq 1
-          cp -- "${files[0]}" "release-artifacts/${{ matrix.platform }}__$(basename "${files[0]}")"
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+          shopt -s nullglob
+          packages=(src-tauri/target/release/bundle/deb/*.deb)
+          test "${#packages[@]}" -eq 1
+          mkdir -p release-assets/platforms release-assets/final
+          artifact_name="linux-x86_64__$(basename "${packages[0]}")"
+          cp -- "${packages[0]}" "release-assets/platforms/$artifact_name"
+          echo "LINUX_ARTIFACT=release-assets/platforms/$artifact_name" >> "$GITHUB_ENV"
+          echo "LINUX_ARTIFACT_BASENAME=$artifact_name" >> "$GITHUB_ENV"
+
+      - name: Attest Linux package provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
-          subject-path: release-artifacts/*
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: ${{ matrix.platform }}
-          path: release-artifacts/*
-          if-no-files-found: error
-          retention-days: 7
-  verify-and-sign-manifest:
-    needs: package
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    environment: production-release
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
-        with:
-          path: release-assets/platforms
-          merge-multiple: true
-      - name: Reconfirm manual verification still targets current main
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          test "$GITHUB_SHA" = "$(git rev-parse origin/main)" || {
-            echo 'main moved during release verification; rerun from the new main HEAD.' >&2
-            exit 1
-          }
-      - name: Prepare and validate release GPG signing key
-        env:
-          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
-          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
-        run: bash scripts/release/prepare-gpg-signing.sh
-      - name: Create and verify signed combined checksum manifest
+          subject-path: release-assets/platforms/*.deb
+
+      - name: Create and verify GPG-authenticated release material
         env:
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        shell: bash
         run: |
           set -euo pipefail
-          test "$(find release-assets/platforms -type f | wc -l)" -eq 3
-          mkdir -p release-assets/final
-          (cd release-assets/platforms && find . -type f -printf '%P\0' | sort -z | xargs -0 sha256sum) > release-assets/final/SHA256SUMS
+          test -f "$LINUX_ARTIFACT"
+          (cd release-assets/platforms && sha256sum -- "$LINUX_ARTIFACT_BASENAME") > release-assets/final/SHA256SUMS
           gpg --batch --armor --export "$RELEASE_GPG_FINGERPRINT" > release-assets/final/RELEASE-GPG-PUBLIC-KEY.asc
           test -s release-assets/final/RELEASE-GPG-PUBLIC-KEY.asc
-          printf '%s' "$RELEASE_GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$RELEASE_GPG_FINGERPRINT" --detach-sign --armor release-assets/final/SHA256SUMS
+
+          printf '%s' "$RELEASE_GPG_PASSPHRASE" |             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0               --local-user "$RELEASE_GPG_FINGERPRINT"               --detach-sign --armor               --output "release-assets/final/$LINUX_ARTIFACT_BASENAME.asc"               "$LINUX_ARTIFACT"
+
+          printf '%s' "$RELEASE_GPG_PASSPHRASE" |             gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0               --local-user "$RELEASE_GPG_FINGERPRINT"               --detach-sign --armor               --output release-assets/final/SHA256SUMS.asc               release-assets/final/SHA256SUMS
+
+          gpg --verify "release-assets/final/$LINUX_ARTIFACT_BASENAME.asc" "$LINUX_ARTIFACT"
           gpg --verify release-assets/final/SHA256SUMS.asc release-assets/final/SHA256SUMS
           (cd release-assets/platforms && sha256sum --check ../final/SHA256SUMS)
-      - name: Upload signed artifacts for workflow-run smoke testing
+
+      - name: Preserve exact signed release artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: signed-production-artifacts-${{ github.sha }}
+          name: signed-linux-release-${{ github.sha }}
           path: release-assets/
           if-no-files-found: error
-          retention-days: 14
-  publish:
-    needs: verify-and-sign-manifest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: production-release
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
-        with:
-          name: signed-production-artifacts-${{ github.sha }}
-          path: release-assets
+          retention-days: 30
+
       - name: Create version-specific release notes
         run: node scripts/release/extract-notes.mjs
-      - name: Publish stable release
+
+      - name: Publish stable Linux release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/platforms/* release-assets/final/* --verify-tag --title "openDownloader $GITHUB_REF_NAME" --notes-file release-notes.md
+        run: |
+          gh release create "$GITHUB_REF_NAME"             release-assets/platforms/*             release-assets/final/*             --verify-tag             --title "openDownloader $GITHUB_REF_NAME"             --notes-file release-notes.md
