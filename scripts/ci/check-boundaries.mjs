@@ -96,6 +96,17 @@ for (const path of await sourceFiles(frontendRoot)) {
 assert.deepEqual(violations, [], `Frontend capability boundary violations:\n${violations.join('\n')}`);
 
 const tauriConfig = JSON.parse(await readFile(join(repositoryRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
+const windowsBundle = tauriConfig.bundle.windows;
+assert.equal(windowsBundle.signCommand, undefined,
+  'Windows release signing must use Tauri native signing rather than a cwd-sensitive custom signCommand');
+assert.equal(windowsBundle.digestAlgorithm, 'sha256',
+  'Windows release signing must use SHA-256 file digests');
+assert.equal(windowsBundle.timestampUrl, 'http://timestamp.digicert.com',
+  'Windows release signing must retain the reviewed RFC3161 timestamp service');
+assert.equal(windowsBundle.tsp, true,
+  'Windows release signing timestamp must use RFC3161/TSP');
+assert.equal(windowsBundle.certificateThumbprint, undefined,
+  'The production signing certificate thumbprint must be injected at release time, not committed');
 const viteFile = join(repositoryRoot, 'vite.config.ts');
 const loadedVite = await loadConfigFromFile({ command: 'serve', mode: 'development' }, viteFile);
 assert.ok(loadedVite, 'Vite development configuration must load');

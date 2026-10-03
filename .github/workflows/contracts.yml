@@ -197,6 +197,69 @@ jobs:
           set -e
           test "$status" -eq 124
 
+  packaged-native-smoke:
+    name: Unsigned package smoke (${{ matrix.platform }})
+    if: github.event_name != 'pull_request' || github.actor != 'dependabot[bot]'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            bundle: nsis
+            platform: windows-x86_64
+          - os: macos-15-intel
+            bundle: dmg
+            platform: macos-x86_64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.96.0
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: src-tauri -> target
+      - name: Install locked frontend dependencies
+        run: npm ci --no-audit --fund=false
+      - name: Build unsigned native package
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }} --no-sign
+      - name: Inspect Windows NSIS package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe')
+          if ($installers.Count -ne 1) { throw 'Expected exactly one unsigned NSIS installer.' }
+          if (-not (Test-Path 'src-tauri/target/release/opendownloader.exe' -PathType Leaf)) { throw 'Expected the Windows application executable.' }
+      - name: Inspect macOS DMG package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#dmgs[@]}" -eq 1
+          hdiutil verify "${dmgs[0]}"
+          mount_dir="$RUNNER_TEMP/opendownloader-dmg-smoke"
+          mkdir -p "$mount_dir"
+          device="$(hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmgs[0]}" | awk 'NR == 1 { print $1 }')"
+          cleanup() {
+            hdiutil detach "$device" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          test -d "$mount_dir/openDownloader.app"
+          test -x "$mount_dir/openDownloader.app/Contents/MacOS/opendownloader"
+
   workflow-security:
     name: Workflow and secret checks
     runs-on: ubuntu-latest

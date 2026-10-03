@@ -51,7 +51,9 @@
         ],
         "displayLanguageSelector": false
       },
-      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release/sign-windows.ps1 -ArtifactPath \"%1\""
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "tsp": true
     }
   }
 }
